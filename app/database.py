@@ -1,11 +1,10 @@
 import os
-from peewee import DatabaseProxy, Model, PostgresqlDatabase
+from peewee import PostgresqlDatabase
 
-db = DatabaseProxy()
+from app.models.schema import db, User, Event, Url
 
-class BaseModel(Model):
-    class Meta:
-        database = db
+ALL_MODELS = [User, Event, Url]
+
 
 def init_db(app):
     database = PostgresqlDatabase(
@@ -16,6 +15,10 @@ def init_db(app):
         password=os.environ.get("DATABASE_PASSWORD", "postgres"),
     )
     db.initialize(database)
+
+    with app.app_context():
+        database.create_tables(ALL_MODELS, safe=True)
+        print("Successfully created database tables!")
 
     @app.before_request
     def _db_connect():

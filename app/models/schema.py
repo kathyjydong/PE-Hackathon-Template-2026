@@ -1,8 +1,11 @@
 import datetime
-from peewee import CharField, TextField, DateTimeField, ForeignKeyField
+from peewee import CharField, TextField, DateTimeField, ForeignKeyField, DatabaseProxy, Model
 
+db = DatabaseProxy()
 
-from database import BaseModel 
+class BaseModel(Model):
+    class Meta:
+        database = db
 
 class User(BaseModel):
     username = CharField(max_length=50, unique=True, index=True)
