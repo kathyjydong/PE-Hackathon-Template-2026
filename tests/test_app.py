@@ -11,9 +11,21 @@ class DummyUrlEntry:
         self.revoked = False
 
 
+class DummyExpression:
+    """Mock Peewee expression that supports chaining with & operators."""
+    def __and__(self, other):
+        return self
+    
+    def __rand__(self, other):
+        return self
+
+
 class DummyField:
     def __eq__(self, other):
-        return other
+        return DummyExpression()
+    
+    def __and__(self, other):
+        return DummyExpression()
 
 
 def make_client(monkeypatch):
