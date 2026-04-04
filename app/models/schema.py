@@ -32,6 +32,7 @@ class Event(BaseModel):
 
 class Url(BaseModel):
     original_url = CharField(max_length=2048)
+    title = CharField(max_length=255, null=True)
     short_code = CharField(max_length=50, unique=True)
     revoked = BooleanField(default=False)
     event = ForeignKeyField(Event, backref='urls', null=True, on_delete='CASCADE')

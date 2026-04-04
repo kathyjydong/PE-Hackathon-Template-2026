@@ -305,3 +305,56 @@ def test_delete_user_returns_no_content(monkeypatch, tmp_path):
 
     assert response.status_code == 204
     assert User.get_or_none(User.id == user.id) is None
+
+
+def test_urls_crud_endpoints(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "urls_crud.db"))
+
+    user = User.create(
+        username="url_owner",
+        email="url_owner@example.com",
+        password_hash="",
+        created_at=datetime(2025, 9, 19, 22, 25, 5),
+    )
+
+    create_response = client.post(
+        "/urls",
+        json={
+            "original_url": "https://example.com/page",
+            "title": "Example page",
+            "user_id": user.id,
+        },
+    )
+
+    assert create_response.status_code == 201
+    created = create_response.get_json()
+    assert created["original_url"] == "https://example.com/page"
+    assert created["title"] == "Example page"
+    assert created["user_id"] == user.id
+    assert created["is_active"] is True
+    assert created["short_code"]
+
+    url_id = created["id"]
+
+    list_response = client.get(f"/urls?user_id={user.id}&is_active=true")
+    assert list_response.status_code == 200
+    assert len(list_response.get_json()) == 1
+
+    get_response = client.get(f"/urls/{url_id}")
+    assert get_response.status_code == 200
+    assert get_response.get_json()["id"] == url_id
+
+    update_response = client.put(
+        f"/urls/{url_id}",
+        json={"title": "Updated title", "is_active": False},
+    )
+    assert update_response.status_code == 200
+    updated = update_response.get_json()
+    assert updated["title"] == "Updated title"
+    assert updated["is_active"] is False
+
+    delete_response = client.delete(f"/urls/{url_id}")
+    assert delete_response.status_code == 204
+
+    missing_response = client.get(f"/urls/{url_id}")
+    assert missing_response.status_code == 404

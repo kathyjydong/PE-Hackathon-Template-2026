@@ -23,6 +23,9 @@ def init_db(app):
             database.execute_sql(
                 "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
             )
+            database.execute_sql(
+                "ALTER TABLE url ADD COLUMN IF NOT EXISTS title VARCHAR(255);"
+            )
             print("Successfully created database tables in Docker!")
         except Exception as e:
             # If a 'duplicate key' error occurs, it means another clone already finished the setup
