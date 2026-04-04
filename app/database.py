@@ -1,6 +1,6 @@
 import os
 from peewee import PostgresqlDatabase
-from app.models import db, ALL_MODELS # Import from our clean bridge
+from app.models import db, ALL_MODELS 
 
 def init_db(app):
     # This reads your .env file to talk to the Docker container
