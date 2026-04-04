@@ -8,4 +8,5 @@ if __name__ == "__main__":
     # FLASK_DEBUG in .env turns this on; override for load tests, e.g.:
     #   FLASK_DEBUG=false uv run run.py
     _debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
-    app.run(debug=_debug)
+    _port = int(os.environ.get("PORT", "5000"))
+    app.run(debug=_debug, port=_port)
