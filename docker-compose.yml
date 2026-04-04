@@ -30,6 +30,7 @@ services:
       - DATABASE_PASSWORD=${DATABASE_PASSWORD}
       - DATABASE_NAME=${DATABASE_NAME}
       - DATABASE_PORT=${DATABASE_PORT}
+      - BASE_URL=${BASE_URL}
 
 # This depends on clause makes it so that the app cannot run without the databasse properly being initialized first
     depends_on:
