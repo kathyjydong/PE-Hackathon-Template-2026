@@ -175,3 +175,38 @@ def test_shorten_persists_to_db(monkeypatch, tmp_path):
 
     created = Url.get(Url.short_code == short_code)
     assert created.original_url == "https://example.com/integration"
+
+
+def test_shorten_with_garbage_json_returns_clean_error(monkeypatch):
+    client = make_client(monkeypatch)
+
+    response = client.post(
+        "/shorten",
+        data="{not-valid-json",
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "URL is missing"}
+
+
+def test_shorten_invalid_custom_alias_returns_clean_error(monkeypatch):
+    client = make_client(monkeypatch)
+
+    response = client.post(
+        "/shorten",
+        json={"url": "https://example.com", "custom_alias": "bad alias!"},
+    )
+
+    assert response.status_code == 400
+    assert "Custom alias" in response.get_json()["error"]
+
+
+def test_method_not_allowed_returns_json_error(monkeypatch):
+    client = make_client(monkeypatch)
+
+    response = client.post("/health")
+
+    assert response.status_code == 405
+    assert response.is_json
+    assert "not allowed" in response.get_json()["error"].lower()
