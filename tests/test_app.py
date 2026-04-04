@@ -1,6 +1,9 @@
+from datetime import datetime
+from pathlib import Path
+
 import app as app_module
 from peewee import SqliteDatabase
-from app.models import ALL_MODELS, Url, db
+from app.models import ALL_MODELS, Url, User, db
 from app.routes import url_shortener
 
 
@@ -30,6 +33,7 @@ class DummyField:
 
 def make_client(monkeypatch):
     # Keep app factory isolated from a real Postgres instance.
+    monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
     monkeypatch.setattr(app_module, "init_db", lambda _app: None)
     test_app = app_module.create_app()
     test_app.config["TESTING"] = True
@@ -54,6 +58,7 @@ def make_client_with_sqlite(monkeypatch, db_path):
             if not db.is_closed():
                 db.close()
 
+    monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
     monkeypatch.setattr(app_module, "init_db", _init_sqlite)
     test_app = app_module.create_app()
     test_app.config["TESTING"] = True
@@ -189,3 +194,98 @@ def test_method_not_allowed_returns_json_error(monkeypatch):
     assert response.status_code == 405
     assert response.is_json
     assert "not allowed" in response.get_json()["error"].lower()
+
+
+def test_bulk_load_users_imports_csv(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "bulk_users.db"))
+    csv_path = Path(__file__).resolve().parents[1] / "csv_data" / "users.csv"
+
+    with csv_path.open("rb") as users_file:
+        response = client.post(
+            "/users/bulk",
+            data={"file": (users_file, "users.csv")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 201
+    assert response.get_json()["count"] == User.select().count()
+    assert User.get_by_id(1).username == "vividdelta57"
+
+
+def test_list_users_and_get_user_by_id(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "list_users.db"))
+
+    first = User.create(
+        username="silvertrail15",
+        email="silvertrail15@hackstack.io",
+        password_hash="",
+        created_at=datetime(2025, 9, 19, 22, 25, 5),
+    )
+    User.create(
+        username="urbancanyon36",
+        email="urbancanyon36@opswise.net",
+        password_hash="",
+        created_at=datetime(2024, 4, 9, 2, 51, 3),
+    )
+
+    response = client.get("/users?page=1&per_page=1")
+
+    assert response.status_code == 200
+    users = response.get_json()
+    assert len(users) == 1
+    assert users[0]["username"] == "silvertrail15"
+
+    response = client.get(f"/users/{first.id}")
+
+    assert response.status_code == 200
+    assert response.get_json()["email"] == "silvertrail15@hackstack.io"
+
+
+def test_create_user_returns_created_user(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "create_user.db"))
+
+    response = client.post(
+        "/users",
+        json={"username": "testuser", "email": "testuser@example.com"},
+    )
+
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["username"] == "testuser"
+    assert body["email"] == "testuser@example.com"
+    assert "password_hash" not in body
+
+
+def test_create_user_rejects_invalid_schema(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "invalid_user.db"))
+
+    response = client.post(
+        "/users",
+        json={"username": 123, "email": "testuser@example.com"},
+    )
+
+    assert response.status_code == 400
+    assert isinstance(response.get_json()["error"], dict)
+    assert response.get_json()["error"]["username"] == "must be a string"
+
+
+def test_update_user_returns_updated_user(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "update_user.db"))
+
+    user = User.create(
+        username="original_user",
+        email="original@example.com",
+        password_hash="",
+        created_at=datetime(2025, 9, 19, 22, 25, 5),
+    )
+
+    response = client.put(
+        f"/users/{user.id}",
+        json={"username": "updated_username"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["id"] == user.id
+    assert body["username"] == "updated_username"
+    assert body["email"] == "original@example.com"
