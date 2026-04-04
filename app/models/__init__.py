@@ -1,1 +1,1 @@
-from app.models.schema import User, Event, Url
+from .schema import db, User, Event, Url, ALL_MODELS
