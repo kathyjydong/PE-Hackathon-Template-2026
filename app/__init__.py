@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
+from werkzeug.exceptions import HTTPException
 from app.database import init_db
 from app.routes import register_routes
 
@@ -26,6 +27,14 @@ def create_app():
 
     @app.errorhandler(500)
     def internal_error(_error):
+        return jsonify(error="Internal server error"), 500
+
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(error):
+        return jsonify(error=error.description), error.code
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(_error):
         return jsonify(error="Internal server error"), 500
 
     return app
