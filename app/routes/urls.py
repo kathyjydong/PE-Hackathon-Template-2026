@@ -1,5 +1,8 @@
+from urllib.parse import urlparse
+
 from flask import Blueprint, jsonify, request
 from peewee import IntegrityError
+from werkzeug.exceptions import BadRequest
 
 from app.models import Url, User
 
@@ -28,8 +31,25 @@ def _serialize_url(item):
         "title": item.title,
         "user_id": item.created_by_id,
         "is_active": not item.revoked,
+        "clicks": item.clicks,
         "created_at": item.created_at.isoformat(timespec="seconds"),
     }
+
+
+def _is_valid_web_url(value):
+    if not isinstance(value, str):
+        return False
+    parsed = urlparse(value.strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _parse_json_body():
+    if not request.is_json:
+        return None, (jsonify(error={"content_type": "Content-Type must be application/json"}), 415)
+    try:
+        return request.get_json(silent=False), None
+    except BadRequest:
+        return None, (jsonify(error={"body": "Malformed JSON body"}), 400)
 
 
 def _generate_unique_short_code():
@@ -70,7 +90,10 @@ def get_url(url_id):
 @urls_bp.route("", methods=["POST"])
 @urls_bp.route("/", methods=["POST"])
 def create_url():
-    payload = request.get_json(silent=True)
+    payload, error_response = _parse_json_body()
+    if error_response:
+        return error_response
+
     if not isinstance(payload, dict):
         return jsonify(error={"body": "Request body must be a JSON object"}), 400
 
@@ -80,6 +103,9 @@ def create_url():
 
     if not isinstance(original_url, str) or not original_url.strip():
         return jsonify(error={"original_url": "original_url is required"}), 400
+
+    if not _is_valid_web_url(original_url):
+        return jsonify(error={"original_url": "original_url must be a valid http/https URL"}), 400
 
     if title is not None and not isinstance(title, str):
         return jsonify(error={"title": "title must be a string"}), 400
@@ -98,6 +124,7 @@ def create_url():
             title=title,
             short_code=_generate_unique_short_code(),
             created_by=created_by,
+            clicks=0,
             revoked=False,
         )
     except IntegrityError:
@@ -112,7 +139,10 @@ def update_url(url_id):
     if item is None:
         return jsonify(error="Not found"), 404
 
-    payload = request.get_json(silent=True)
+    payload, error_response = _parse_json_body()
+    if error_response:
+        return error_response
+
     if not isinstance(payload, dict):
         return jsonify(error={"body": "Request body must be a JSON object"}), 400
 
@@ -134,6 +164,8 @@ def update_url(url_id):
         original_url = payload.get("original_url")
         if not isinstance(original_url, str) or not original_url.strip():
             return jsonify(error={"original_url": "original_url must be a non-empty string"}), 400
+        if not _is_valid_web_url(original_url):
+            return jsonify(error={"original_url": "original_url must be a valid http/https URL"}), 400
         updates["original_url"] = original_url.strip()
 
     if not updates:
@@ -150,3 +182,11 @@ def delete_url(url_id):
     if deleted == 0:
         return jsonify(error="Not found"), 404
     return "", 204
+
+
+@urls_bp.route("/<int:url_id>/analytics", methods=["GET"])
+def url_analytics(url_id):
+    item = Url.get_or_none(Url.id == url_id)
+    if item is None:
+        return jsonify(error="Not found"), 404
+    return jsonify({"id": item.id, "short_code": item.short_code, "clicks": item.clicks}), 200

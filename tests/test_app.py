@@ -415,3 +415,48 @@ def test_urls_crud_endpoints(monkeypatch, tmp_path):
 
     missing_response = client.get(f"/urls/{url_id}")
     assert missing_response.status_code == 404
+
+
+def test_urls_create_rejects_invalid_url(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "urls_invalid_url.db"))
+
+    user = User.create(
+        username="url_validator",
+        email="url_validator@example.com",
+        password_hash="",
+        created_at=datetime(2025, 9, 19, 22, 25, 5),
+    )
+
+    response = client.post(
+        "/urls",
+        json={"original_url": "hello", "title": "Bad URL", "user_id": user.id},
+    )
+
+    assert response.status_code == 400
+    assert "valid http/https" in response.get_json()["error"]["original_url"]
+
+
+def test_urls_create_rejects_malformed_json(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "urls_bad_json.db"))
+
+    response = client.post(
+        "/urls",
+        data='{"original_url":"https://example.com"',
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["body"] == "Malformed JSON body"
+
+
+def test_urls_create_requires_json_content_type(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "urls_content_type.db"))
+
+    response = client.post(
+        "/urls",
+        data="original_url=https://example.com",
+        content_type="text/plain",
+    )
+
+    assert response.status_code == 415
+    assert response.get_json()["error"]["content_type"] == "Content-Type must be application/json"
