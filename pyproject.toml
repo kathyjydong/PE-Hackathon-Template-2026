@@ -10,3 +10,6 @@ dependencies = [
     "pytest>=9.0.2",
     "python-dotenv>=1.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
