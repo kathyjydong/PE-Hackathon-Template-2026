@@ -149,6 +149,13 @@ def create_user():
     except ValueError as exc:
         return jsonify(error=exc.args[0]), 400
 
+    existing = User.get_or_none((User.username == username) | (User.email == email))
+    if existing is not None:
+        # Idempotent create: same payload should return the existing resource.
+        if existing.username == username and existing.email == email:
+            return jsonify(_serialize_user(existing)), 201
+        return jsonify(error={"user": "username or email already exists"}), 409
+
     try:
         user = User.create(username=username, email=email, password_hash="")
     except IntegrityError:
@@ -204,3 +211,11 @@ def update_user(user_id):
 
     user = User.get_by_id(user_id)
     return jsonify(_serialize_user(user))
+
+
+@users_bp.route("/users/<int:user_id>", methods=["DELETE"])
+def delete_user(user_id):
+    deleted = User.delete().where(User.id == user_id).execute()
+    if deleted == 0:
+        return jsonify(error="Not found"), 404
+    return "", 204

@@ -289,3 +289,19 @@ def test_update_user_returns_updated_user(monkeypatch, tmp_path):
     assert body["id"] == user.id
     assert body["username"] == "updated_username"
     assert body["email"] == "original@example.com"
+
+
+def test_delete_user_returns_no_content(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "delete_user.db"))
+
+    user = User.create(
+        username="to_delete",
+        email="to_delete@example.com",
+        password_hash="",
+        created_at=datetime(2025, 9, 19, 22, 25, 5),
+    )
+
+    response = client.delete(f"/users/{user.id}")
+
+    assert response.status_code == 204
+    assert User.get_or_none(User.id == user.id) is None
