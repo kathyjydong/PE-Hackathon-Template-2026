@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template
 from app.database import init_db
 from app.routes import register_routes
 
@@ -12,8 +12,20 @@ def create_app():
 
     register_routes(app)
 
+    @app.route("/")
+    def home():
+        return render_template("index.html")
+
     @app.route("/health")
     def health():
         return jsonify(status="ok")
+
+    @app.errorhandler(404)
+    def not_found(_error):
+        return jsonify(error="Not found"), 404
+
+    @app.errorhandler(500)
+    def internal_error(_error):
+        return jsonify(error="Internal server error"), 500
 
     return app
