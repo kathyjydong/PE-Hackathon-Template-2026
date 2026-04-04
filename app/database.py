@@ -17,6 +17,10 @@ def init_db(app):
 
     with app.app_context():
         database.create_tables(ALL_MODELS, safe=True)
+        # Peewee create_tables(safe=True) does not add new columns to existing tables.
+        database.execute_sql(
+            "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
+        )
         print("Successfully created database tables in Docker!")
 
     @app.before_request

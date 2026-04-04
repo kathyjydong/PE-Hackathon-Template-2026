@@ -1,6 +1,14 @@
 import datetime
 import secrets
-from peewee import CharField, TextField, DateTimeField, ForeignKeyField, DatabaseProxy, Model
+from peewee import (
+    BooleanField,
+    CharField,
+    DatabaseProxy,
+    DateTimeField,
+    ForeignKeyField,
+    Model,
+    TextField,
+)
 
 
 db = DatabaseProxy()
@@ -25,6 +33,7 @@ class Event(BaseModel):
 class Url(BaseModel):
     original_url = CharField(max_length=2048)
     short_code = CharField(max_length=50, unique=True)
+    revoked = BooleanField(default=False)
     event = ForeignKeyField(Event, backref='urls', null=True, on_delete='CASCADE')
     created_by = ForeignKeyField(User, backref='created_urls', null=True, on_delete='CASCADE')
     created_at = DateTimeField(default=datetime.datetime.now)
