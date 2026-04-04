@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Peachy Links</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <div class="eyebrow">MLH Hackathon URL Shortener</div>
+        <h1>Shorten, copy, and revoke links without the clutter.</h1>
+        <p>
+          Paste a long URL, optionally add a custom alias, and manage the short link
+          from a clean interface built with Flask and Jinja.
+        </p>
+      </section>
+
+      <section class="grid-layout">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Create</div>
+              <h2>Make a short link</h2>
+            </div>
+            <p>Use a custom alias if you want a branded link.</p>
+          </div>
+
+          <form id="shorten-form" class="form">
+            <label>
+              <span>Long URL</span>
+              <input
+                id="url-input"
+                name="url"
+                type="url"
+                placeholder="https://example.com/very/long/link"
+                required
+              />
+            </label>
+
+            <label>
+              <span>Custom alias <em>optional</em></span>
+              <input
+                id="alias-input"
+                name="custom_alias"
+                type="text"
+                placeholder="my-link"
+                minlength="3"
+                maxlength="32"
+              />
+            </label>
+
+            <button type="submit">Shorten link</button>
+          </form>
+
+          <div id="message" class="message" aria-live="polite"></div>
+
+          <div id="result" class="result hidden">
+            <div>
+              <span class="result-label">Your short link</span>
+              <a id="short-url" href="#" target="_blank" rel="noreferrer"></a>
+            </div>
+            <div class="result-actions">
+              <button id="copy-btn" type="button">Copy</button>
+              <button id="revoke-current-btn" type="button" class="ghost">Revoke</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel panel-soft">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Revoke</div>
+              <h2>Disable an existing link</h2>
+            </div>
+            <p>Paste the short code or full short URL to revoke access.</p>
+          </div>
+
+          <form id="revoke-form" class="form compact">
+            <label>
+              <span>Short code or short URL</span>
+              <input
+                id="revoke-input"
+                name="short_code"
+                type="text"
+                placeholder="my-link or https://your-domain/my-link"
+                required
+              />
+            </label>
+
+            <button type="submit" class="danger">Revoke link</button>
+          </form>
+
+          <p class="helper-text">
+            Revoked links return a <strong>410 Gone</strong> response instead of redirecting.
+          </p>
+        </section>
+      </section>
+
+      <section class="features">
+        <article>
+          <strong>Fast</strong>
+          <p>Instant feedback from the API.</p>
+        </article>
+        <article>
+          <strong>Custom</strong>
+          <p>Optional aliases for branded links.</p>
+        </article>
+        <article>
+          <strong>Manageable</strong>
+          <p>Revoke old links without touching the database manually.</p>
+        </article>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
