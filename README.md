@@ -216,3 +216,7 @@ curl -i http://localhost:5000/does-not-exist
 curl -i http://localhost:5000/some-missing-short-code
 # HTTP/1.1 404
 ```
+
+## Failure Modes
+
+For the full graceful-failure behavior, chaos testing steps, and live demo checklist, see [Failure Modes](docs/failure-modes.md).
