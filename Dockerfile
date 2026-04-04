@@ -2,7 +2,7 @@
 
 
 # Tell it which python to load, online docs recommend python 3.12-slim
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 # This installs uv into the container
 # given to me by gemini
