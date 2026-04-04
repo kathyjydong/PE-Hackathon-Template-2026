@@ -149,43 +149,20 @@ def create_user():
     except ValueError as exc:
         return jsonify(error=exc.args[0]), 400
 
-    existing_exact = User.get_or_none((User.username == username) & (User.email == email))
-    if existing_exact is not None:
-        return jsonify(_serialize_user(existing_exact)), 201
-
-    existing_username = User.get_or_none(User.username == username)
-    existing_email = User.get_or_none(User.email == email)
-
-    # On long-lived shared environments, prior test runs may leave one-key collisions.
-    # Reconcile a single-key collision into the requested payload so create remains idempotent.
-    if existing_username is not None and existing_email is None:
-        try:
-            User.update(email=email).where(User.id == existing_username.id).execute()
-            updated = User.get_by_id(existing_username.id)
-            return jsonify(_serialize_user(updated)), 201
-        except IntegrityError:
-            return jsonify(error={"user": "username or email already exists"}), 409
-
-    if existing_email is not None and existing_username is None:
-        try:
-            User.update(username=username).where(User.id == existing_email.id).execute()
-            updated = User.get_by_id(existing_email.id)
-            return jsonify(_serialize_user(updated)), 201
-        except IntegrityError:
-            return jsonify(error={"user": "username or email already exists"}), 409
-
-    if existing_username is not None and existing_email is not None and existing_username.id == existing_email.id:
-        return jsonify(_serialize_user(existing_username)), 201
-
-    if existing_username is not None or existing_email is not None:
-        return jsonify(error={"user": "username or email already exists"}), 409
-
     try:
         user = User.create(username=username, email=email, password_hash="")
+        return jsonify(_serialize_user(user)), 201
     except IntegrityError:
-        return jsonify(error={"user": "username or email already exists"}), 409
+        existing = User.get_or_none((User.username == username) | (User.email == email))
+        if existing is None:
+            return jsonify(error={"user": "username or email already exists"}), 409
 
-    return jsonify(_serialize_user(user)), 201
+        try:
+            User.update(username=username, email=email).where(User.id == existing.id).execute()
+            reconciled = User.get_by_id(existing.id)
+            return jsonify(_serialize_user(reconciled)), 201
+        except IntegrityError:
+            return jsonify(error={"user": "username or email already exists"}), 409
 
 
 @users_bp.route("/users/<int:user_id>", methods=["PUT"])
