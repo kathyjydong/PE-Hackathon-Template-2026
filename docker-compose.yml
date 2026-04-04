@@ -10,6 +10,12 @@ services:
       POSTGRES_DB: ${DATABASE_NAME}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: always
 
 # 2. The Clone Army (Your Flask App)
@@ -24,16 +30,18 @@ services:
       - DATABASE_PASSWORD=${DATABASE_PASSWORD}
       - DATABASE_NAME=${DATABASE_NAME}
       - DATABASE_PORT=${DATABASE_PORT}
-      
+
 # This depends on clause makes it so that the app cannot run without the databasse properly being initialized first
     depends_on:
-      - db
+      db:
+        condition: service_healthy # THE FIX: App waits for the DB Healthcheck to pass
     restart: always
 
 # 3. The Traffic Cop (Nginx Load Balancer)
 # This is where all users get routed to to know which container to go to and handles the load for each thing
   nginx:
     image: nginx:alpine
+# we can change this to localhost to test locally for development but for production thats the correct address
     ports:
       - "80:80"
 
