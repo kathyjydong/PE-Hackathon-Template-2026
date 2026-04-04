@@ -1,9 +1,7 @@
 from dotenv import load_dotenv
 from flask import Flask, jsonify
-
-from app.database import init_db
+from app.database import init_db, db 
 from app.routes import register_routes
-
 
 def create_app():
     load_dotenv()
@@ -12,7 +10,13 @@ def create_app():
 
     init_db(app)
 
-    from app import models  # noqa: F401 - registers models with Peewee
+    from app import models  
+
+
+    with app.app_context():
+        db.create_tables([models.User, models.Event, models.Url])
+        print("Successfully created database tables!")
+   
 
     register_routes(app)
 
