@@ -48,7 +48,7 @@ services:
 # we can change this to localhost to test locally for development but for production thats the correct address
     ports:
       - "80:80"
-
+      - "443:443"
 # This is what actually connects the nginx.conf file to the nginx container
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
