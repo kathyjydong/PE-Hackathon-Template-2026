@@ -1,4 +1,6 @@
 import app as app_module
+from peewee import SqliteDatabase
+from app.models import ALL_MODELS, Url, db
 from app.routes import url_shortener
 
 
@@ -6,6 +8,7 @@ class DummyUrlEntry:
     def __init__(self, original_url, short_code):
         self.original_url = original_url
         self.short_code = short_code
+        self.revoked = False
 
 
 class DummyField:
@@ -16,6 +19,30 @@ class DummyField:
 def make_client(monkeypatch):
     # Keep app factory isolated from a real Postgres instance.
     monkeypatch.setattr(app_module, "init_db", lambda _app: None)
+    test_app = app_module.create_app()
+    test_app.config["TESTING"] = True
+    return test_app.test_client()
+
+
+def make_client_with_sqlite(monkeypatch, db_path):
+    sqlite_db = SqliteDatabase(db_path)
+
+    def _init_sqlite(app):
+        db.initialize(sqlite_db)
+
+        with app.app_context():
+            sqlite_db.create_tables(ALL_MODELS, safe=True)
+
+        @app.before_request
+        def _db_connect():
+            db.connect(reuse_if_open=True)
+
+        @app.teardown_appcontext
+        def _db_close(_exc):
+            if not db.is_closed():
+                db.close()
+
+    monkeypatch.setattr(app_module, "init_db", _init_sqlite)
     test_app = app_module.create_app()
     test_app.config["TESTING"] = True
     return test_app.test_client()
@@ -36,6 +63,7 @@ def test_shorten_returns_generated_code(monkeypatch):
     class DummyUrl:
         original_url = DummyField()
         short_code = DummyField()
+        revoked = DummyField()
 
         @staticmethod
         def get_or_none(_query):
@@ -63,6 +91,7 @@ def test_shorten_uses_custom_alias(monkeypatch):
     class DummyUrl:
         original_url = DummyField()
         short_code = DummyField()
+        revoked = DummyField()
 
         @staticmethod
         def get_or_none(_query):
@@ -88,6 +117,7 @@ def test_resolve_redirects(monkeypatch):
 
     class DummyUrl:
         short_code = DummyField()
+        revoked = DummyField()
 
         @staticmethod
         def get_or_none(_query):
@@ -99,3 +129,16 @@ def test_resolve_redirects(monkeypatch):
 
     assert response.status_code == 302
     assert response.headers["Location"] == "https://www.google.com"
+
+
+def test_shorten_persists_to_db(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "integration.db"))
+
+    response = client.post("/shorten", json={"url": "https://example.com/integration"})
+
+    assert response.status_code == 201
+    short_url = response.get_json()["short_url"]
+    short_code = short_url.rsplit("/", 1)[-1]
+
+    created = Url.get(Url.short_code == short_code)
+    assert created.original_url == "https://example.com/integration"
