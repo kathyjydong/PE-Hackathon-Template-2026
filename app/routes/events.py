@@ -38,12 +38,19 @@ def _serialize_event(event, url_id=None):
             pass
 
     return {
+        # Expected keys for hackathon tests
         "id": event.id,
+        "event_type": event.title,
+        "details": description,
+        "timestamp": event.start_time.isoformat(timespec="seconds"),
+        "user_id": event.host_id,
+        "url_id": url_id,
+
+        # Backward-compatible aliases
         "title": event.title,
         "description": description,
         "start_time": event.start_time.isoformat(timespec="seconds"),
         "host_id": event.host_id,
-        "url_id": url_id,
     }
 
 
