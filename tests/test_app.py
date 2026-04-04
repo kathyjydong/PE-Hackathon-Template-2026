@@ -171,7 +171,16 @@ def test_shorten_with_garbage_json_returns_clean_error(monkeypatch):
     )
 
     assert response.status_code == 400
-    assert response.get_json() == {"error": "URL is missing"}
+    assert response.get_json() == {"error": "Malformed JSON body"}
+
+
+def test_shorten_requires_json_content_type(monkeypatch):
+    client = make_client(monkeypatch)
+
+    response = client.post("/shorten", data="url=https://example.com")
+
+    assert response.status_code == 415
+    assert response.get_json() == {"error": "Content-Type must be application/json"}
 
 
 def test_shorten_invalid_custom_alias_returns_clean_error(monkeypatch):
@@ -305,6 +314,54 @@ def test_delete_user_returns_no_content(monkeypatch, tmp_path):
 
     assert response.status_code == 204
     assert User.get_or_none(User.id == user.id) is None
+
+
+def test_shorten_same_url_twice_returns_distinct_codes(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "twin_codes.db"))
+
+    first = client.post("/shorten", json={"url": "https://google.com"})
+    second = client.post("/shorten", json={"url": "https://google.com"})
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    first_code = first.get_json()["short_url"].rsplit("/", 1)[-1]
+    second_code = second.get_json()["short_url"].rsplit("/", 1)[-1]
+    assert first_code != second_code
+
+
+def test_resolve_increments_clicks_and_analytics(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "clicks.db"))
+
+    create_response = client.post("/shorten", json={"url": "https://example.com/clicks"})
+    short_code = create_response.get_json()["short_url"].rsplit("/", 1)[-1]
+
+    for _ in range(3):
+        resolve_response = client.get(f"/{short_code}")
+        assert resolve_response.status_code == 302
+
+    stats = client.get(f"/analytics/{short_code}")
+    assert stats.status_code == 200
+    assert stats.get_json()["clicks"] == 3
+
+
+def test_revoked_link_does_not_increment_clicks(monkeypatch, tmp_path):
+    client = make_client_with_sqlite(monkeypatch, str(tmp_path / "revoked_clicks.db"))
+
+    create_response = client.post("/shorten", json={"url": "https://example.com/revoked"})
+    short_code = create_response.get_json()["short_url"].rsplit("/", 1)[-1]
+
+    first_hit = client.get(f"/{short_code}")
+    assert first_hit.status_code == 302
+
+    revoke = client.post("/revoke", json={"short_code": short_code})
+    assert revoke.status_code == 200
+
+    revoked_hit = client.get(f"/{short_code}")
+    assert revoked_hit.status_code == 410
+
+    stats = client.get(f"/analytics/{short_code}")
+    assert stats.status_code == 200
+    assert stats.get_json()["clicks"] == 1
 
 
 def test_urls_crud_endpoints(monkeypatch, tmp_path):
