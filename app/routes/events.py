@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -29,10 +30,17 @@ def _parse_datetime(value):
 
 
 def _serialize_event(event, url_id=None):
+    description = event.description
+    if isinstance(description, str) and description:
+        try:
+            description = json.loads(description)
+        except (TypeError, ValueError):
+            pass
+
     return {
         "id": event.id,
         "title": event.title,
-        "description": event.description,
+        "description": description,
         "start_time": event.start_time.isoformat(timespec="seconds"),
         "host_id": event.host_id,
         "url_id": url_id,
@@ -81,8 +89,10 @@ def create_event():
         return jsonify(error={"title": "title or event_type is required"}), 400
 
     description = payload.get("description", payload.get("details"))
-    if description is not None and not isinstance(description, str):
-        return jsonify(error={"description": "description/details must be a string"}), 400
+    if isinstance(description, (dict, list)):
+        description = json.dumps(description)
+    elif description is not None and not isinstance(description, str):
+        return jsonify(error={"description": "description/details must be a string or JSON object"}), 400
 
     start_time_raw = payload.get("start_time", payload.get("timestamp"))
     try:
