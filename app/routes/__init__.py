@@ -1,8 +1,6 @@
-def register_routes(app):
-    """Register all route blueprints with the Flask app.
+from .url_shortener import url_bp
 
-    Add your blueprints here. Example:
-        from app.routes.products import products_bp
-        app.register_blueprint(products_bp)
-    """
-    pass
+def register_routes(app):
+    """Register all route blueprints with the Flask app."""
+    # This 'plugs in' your URL shortener logic
+    app.register_blueprint(url_bp)

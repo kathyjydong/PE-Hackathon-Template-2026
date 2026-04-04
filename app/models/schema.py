@@ -1,6 +1,8 @@
 import datetime
+import secrets
 from peewee import CharField, TextField, DateTimeField, ForeignKeyField, DatabaseProxy, Model
 
+# The proxy is the "phone line" that database.py will plug into later
 db = DatabaseProxy()
 
 class BaseModel(Model):
@@ -20,8 +22,17 @@ class Event(BaseModel):
     host = ForeignKeyField(User, backref='events', on_delete='CASCADE')
 
 class Url(BaseModel):
-    target_url = CharField(max_length=2048)
+    # Renamed to original_url to match your routes logic
+    original_url = CharField(max_length=2048)
     short_code = CharField(max_length=50, unique=True)
+    # Optional fields from your original schema
     event = ForeignKeyField(Event, backref='urls', null=True, on_delete='CASCADE')
-    created_by = ForeignKeyField(User, backref='created_urls', on_delete='CASCADE')
+    created_by = ForeignKeyField(User, backref='created_urls', null=True, on_delete='CASCADE')
     created_at = DateTimeField(default=datetime.datetime.now)
+
+    @classmethod
+    def generate_code(cls):
+        return secrets.token_urlsafe(6)
+
+# This list tells the database which tables to create in Docker
+ALL_MODELS = [User, Event, Url]
