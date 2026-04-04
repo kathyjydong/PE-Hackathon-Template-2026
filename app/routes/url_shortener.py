@@ -2,7 +2,7 @@ import os
 import re
 
 from flask import Blueprint, request, jsonify, redirect
-from app.models import Url
+from app.models import Url, db
 from app.short_link_cache import (
     delete_cached_short_link,
     get_cached_short_link,
@@ -21,6 +21,13 @@ def _base_url():
 
 def _short_url(short_code):
     return f"{_base_url()}/{short_code}"
+
+
+def _with_cache_headers(resp, label: str):
+    """HIT/MISS for k6 and proxies; duplicate header helps clients that drop X-Cache."""
+    resp.headers["X-Cache"] = label
+    resp.headers["X-Cache-Status"] = label
+    return resp
 
 
 # Method to generate a short code for URL
@@ -97,26 +104,22 @@ def resolve(short_code):
         if not cached.get("active", False):
             resp = jsonify({"error": "This link has been revoked"})
             resp.status_code = 410
-            resp.headers["X-Cache"] = "HIT"
-            return resp
+            return _with_cache_headers(resp, "HIT")
         resp = redirect(cached["url"])
-        resp.headers["X-Cache"] = "HIT"
-        return resp
+        return _with_cache_headers(resp, "HIT")
 
+    db.connect(reuse_if_open=True)
     entry = Url.get_or_none(Url.short_code == short_code)
     if entry is None:
         resp = jsonify({"error": "Not found"})
         resp.status_code = 404
-        resp.headers["X-Cache"] = "MISS"
-        return resp
+        return _with_cache_headers(resp, "MISS")
 
     set_cached_short_link(short_code, url_row_to_cache_dict(entry))
 
     if entry.revoked:
         resp = jsonify({"error": "This link has been revoked"})
         resp.status_code = 410
-        resp.headers["X-Cache"] = "MISS"
-        return resp
+        return _with_cache_headers(resp, "MISS")
     resp = redirect(entry.original_url)
-    resp.headers["X-Cache"] = "MISS"
-    return resp
+    return _with_cache_headers(resp, "MISS")

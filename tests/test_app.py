@@ -1,5 +1,6 @@
 import app as app_module
 from peewee import SqliteDatabase
+from app.database import register_db_hooks
 from app.models import ALL_MODELS, Url, db
 from app.routes import url_shortener
 
@@ -31,8 +32,16 @@ class DummyField:
 
 
 def make_client(monkeypatch):
-    # Keep app factory isolated from a real Postgres instance and Redis.
-    monkeypatch.setattr(app_module, "init_db", lambda _app: None)
+    """SQLite in memory + same DB hooks as production (resolve skips eager connect)."""
+
+    def _init_sqlite_memory(app):
+        sqlite_db = SqliteDatabase(":memory:")
+        db.initialize(sqlite_db)
+        with app.app_context():
+            sqlite_db.create_tables(ALL_MODELS, safe=True)
+        register_db_hooks(app)
+
+    monkeypatch.setattr(app_module, "init_db", _init_sqlite_memory)
     monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
     test_app = app_module.create_app()
     test_app.config["TESTING"] = True
@@ -48,14 +57,7 @@ def make_client_with_sqlite(monkeypatch, db_path):
         with app.app_context():
             sqlite_db.create_tables(ALL_MODELS, safe=True)
 
-        @app.before_request
-        def _db_connect():
-            db.connect(reuse_if_open=True)
-
-        @app.teardown_appcontext
-        def _db_close(_exc):
-            if not db.is_closed():
-                db.close()
+        register_db_hooks(app)
 
     monkeypatch.setattr(app_module, "init_db", _init_sqlite)
     monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
