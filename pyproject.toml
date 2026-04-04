@@ -5,6 +5,7 @@ requires-python = ">=3.13"
 dependencies = [
     "faker>=33.0",
     "flask>=3.1",
+    "gunicorn>=25.3.0",
     "peewee>=3.17",
     "psycopg2-binary>=2.9",
     "pytest>=9.0.2",
@@ -13,3 +14,9 @@ dependencies = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=50"
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]

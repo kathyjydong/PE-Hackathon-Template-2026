@@ -190,3 +190,29 @@ query = (Product
 - Wrap bulk inserts in `db.atomic()` for transactional safety and performance.
 - The template uses `teardown_appcontext` for connection cleanup, so connections are closed even when requests fail.
 - Check `.env.example` for all available configuration options.
+
+## Error Handling
+
+The app returns JSON errors for common HTTP failures:
+
+- `404 Not Found`: returned when a route does not exist (including unknown short codes).
+    Response body:
+    ```json
+    {"error": "Not found"}
+    ```
+
+- `500 Internal Server Error`: returned when an unhandled server exception occurs.
+    Response body:
+    ```json
+    {"error": "Internal server error"}
+    ```
+
+Example checks:
+
+```bash
+curl -i http://localhost:5000/does-not-exist
+# HTTP/1.1 404
+
+curl -i http://localhost:5000/some-missing-short-code
+# HTTP/1.1 404
+```

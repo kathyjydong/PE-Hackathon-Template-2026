@@ -36,27 +36,51 @@ def shorten():
     if custom_alias:
         alias_entry = Url.get_or_none(Url.short_code == custom_alias)
         if alias_entry:
-            if alias_entry.original_url == long_url:
+            if not alias_entry.revoked and alias_entry.original_url == long_url:
                 return jsonify({"short_url": _short_url(alias_entry.short_code)})
             return jsonify({"error": "That custom alias is already taken"}), 409
 
         Url.create(original_url=long_url, short_code=custom_alias)
         return jsonify({"short_url": _short_url(custom_alias)}), 201
 
-# Logic for if it already exists within the docker container db just return it
-    existing = Url.get_or_none(Url.original_url == long_url)
+    # Logic for if it already exists within the docker container db just return it
+    existing = Url.get_or_none(
+        (Url.original_url == long_url) & (Url.revoked == False)  # noqa: E712
+    )
     if existing:
         return jsonify({"short_url": _short_url(existing.short_code)})
 
-# Save new link to the Postgres docker container
+    # Save new link to the Postgres docker container
     new_code = Url.generate_code()
     Url.create(original_url=long_url, short_code=new_code)
     return jsonify({"short_url": _short_url(new_code)}), 201
+
+
+@url_bp.route("/revoke", methods=["POST"])
+def revoke():
+    """Mark a short link as revoked. The row stays in the database; redirects stop."""
+    data = request.get_json(silent=True) or {}
+    short_code = (data.get("short_code") or "").strip()
+    if not short_code:
+        return jsonify({"error": "short_code is required"}), 400
+
+    entry = Url.get_or_none(Url.short_code == short_code)
+    if entry is None:
+        return jsonify({"error": "Unknown short_code"}), 404
+
+    if entry.revoked:
+        return jsonify({"short_code": short_code, "revoked": True}), 200
+
+    Url.update(revoked=True).where(Url.id == entry.id).execute()
+    return jsonify({"short_code": short_code, "revoked": True}), 200
+
 
 # Get endpoint for getting the original URL from the short code. Logic behind redirect
 @url_bp.route('/<short_code>', methods=['GET'])
 def resolve(short_code):
     entry = Url.get_or_none(Url.short_code == short_code)
-    if entry:
-        return redirect(entry.original_url)
-    return abort(404)
+    if entry is None:
+        return abort(404)
+    if entry.revoked:
+        return jsonify({"error": "This link has been revoked"}), 410
+    return redirect(entry.original_url)
