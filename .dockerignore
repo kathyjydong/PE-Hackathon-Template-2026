@@ -1,0 +1,19 @@
+# All Files to be ignored by dockerfile blueprint
+
+# Secrets and Local Environments
+.env
+.venv
+.git
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Project Metadata
+.github/
+.gitignore
+README.md
+Dockerfile
+.dockerignore
