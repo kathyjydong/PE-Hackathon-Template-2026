@@ -149,29 +149,21 @@ def create_user():
     except ValueError as exc:
         return jsonify(error=exc.args[0]), 400
 
-    # Using an atomic transaction to handle the creation/reconciliation
-    with User._meta.database.atomic():
+    try:
+        user = User.create(username=username, email=email, password_hash="")
+        return jsonify(_serialize_user(user)), 201
+    except IntegrityError:
+        # Important: do reconciliation outside the failed insert transaction.
+        # Postgres marks a transaction as aborted after an integrity violation.
+        existing = User.get_or_none((User.username == username) | (User.email == email))
+        if existing is None:
+            return jsonify(error={"user": "username or email already exists"}), 409
+
         try:
-            # Try to create the user
-            user = User.create(username=username, email=email, password_hash="")
-            return jsonify(_serialize_user(user)), 201
+            User.update(username=username, email=email).where(User.id == existing.id).execute()
+            reconciled = User.get_by_id(existing.id)
+            return jsonify(_serialize_user(reconciled)), 201
         except IntegrityError:
-            # If creation fails, find WHY. 
-            # Is it the username, the email, or both?
-            existing = User.get_or_none((User.username == username) | (User.email == email))
-            
-            if existing:
-                try:
-                    # Attempt to update the existing record to match the new input
-                    # This effectively turns the POST into an Upsert
-                    existing.username = username
-                    existing.email = email
-                    existing.save()
-                    return jsonify(_serialize_user(existing)), 201
-                except IntegrityError:
-                    # This happens if the update itself conflicts with a THIRD record
-                    return jsonify(error={"user": "reconciliation failed: username or email taken"}), 409
-            
             return jsonify(error={"user": "username or email already exists"}), 409
 
 
