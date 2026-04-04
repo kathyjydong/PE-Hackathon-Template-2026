@@ -16,12 +16,17 @@ def init_db(app):
     db.initialize(database)
 
     with app.app_context():
-        database.create_tables(ALL_MODELS, safe=True)
-        # Peewee create_tables(safe=True) does not add new columns to existing tables.
-        database.execute_sql(
-            "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
-        )
-        print("Successfully created database tables in Docker!")
+        # SAFETY UPDATE: Wrapped in try/except to prevent clones from crashing each other
+        try:
+            database.create_tables(ALL_MODELS, safe=True)
+            # Peewee create_tables(safe=True) does not add new columns to existing tables.
+            database.execute_sql(
+                "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
+            )
+            print("Successfully created database tables in Docker!")
+        except Exception as e:
+            # If a 'duplicate key' error occurs, it means another clone already finished the setup
+            print(f"Database already initialized by another instance, skipping: {e}")
 
     @app.before_request
     def _db_connect():
