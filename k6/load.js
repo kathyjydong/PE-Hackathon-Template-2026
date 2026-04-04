@@ -1,14 +1,17 @@
 import http from "k6/http";
 import { check, sleep } from "k6";
 
-// Change: Defaulting to Port 80 (the Load Balancer) instead of 5000 (the App)
-const BASE_URL = (__ENV.BASE_URL || "http://127.0.0.1").replace(/\/$/, "");
+// Default :5000 = uv run / gunicorn on host. Docker Compose nginx on :80 → BASE_URL=http://127.0.0.1
+const BASE_URL = (__ENV.BASE_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
+
+// TARGET_VUS from env, default 500. Example: TARGET_VUS=50 k6 run k6/load.js
+const TARGET_VUS = parseInt(__ENV.TARGET_VUS || "500", 10);
 
 export const options = {
   stages: [
-    { duration: "30s", target: 50 }, // Ramp up to 50 users
-    { duration: "2m", target: 50 },  // Stay at 50 users (The "Stress" phase)
-    { duration: "30s", target: 0 },  // Ramp down
+    { duration: "60s", target: TARGET_VUS },
+    { duration: "2m", target: TARGET_VUS },
+    { duration: "30s", target: 0 },
   ],
   thresholds: {
     // If more than 10% of requests fail, the test fails
@@ -17,6 +20,22 @@ export const options = {
     http_req_duration: ["p(95)<5000"],
   },
 };
+
+/** One request before the test; fails fast with a clear message if BASE_URL is wrong. */
+export function setup() {
+  const res = http.get(`${BASE_URL}/health`);
+  if (res.status !== 200) {
+    const hint =
+      res.status === 0
+        ? " (connection failed — wrong port or server not running)"
+        : "";
+    throw new Error(
+      `k6 setup: GET ${BASE_URL}/health → status ${res.status}${hint}. ` +
+        `Use BASE_URL=http://127.0.0.1:5000 for uv run / gunicorn on host, ` +
+        `or BASE_URL=http://127.0.0.1 after docker compose up (nginx :80).`
+    );
+  }
+}
 
 export default function () {
   // 1. Check Health
@@ -37,6 +56,4 @@ export default function () {
     "shorten 201 or 200": (r) => r.status === 201 || r.status === 200,
   });
 
-  // Wait 0.5 seconds before the next loop to simulate a "thinking" human
-  sleep(0.5);
 }

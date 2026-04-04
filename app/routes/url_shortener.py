@@ -1,8 +1,14 @@
 import os
 import re
 
-from flask import Blueprint, request, jsonify, redirect, abort
+from flask import Blueprint, request, jsonify, redirect
 from app.models import Url
+from app.short_link_cache import (
+    delete_cached_short_link,
+    get_cached_short_link,
+    set_cached_short_link,
+    url_row_to_cache_dict,
+)
 
 url_bp = Blueprint('url', __name__)
 
@@ -37,10 +43,14 @@ def shorten():
         alias_entry = Url.get_or_none(Url.short_code == custom_alias)
         if alias_entry:
             if not alias_entry.revoked and alias_entry.original_url == long_url:
+                set_cached_short_link(
+                    alias_entry.short_code, url_row_to_cache_dict(alias_entry)
+                )
                 return jsonify({"short_url": _short_url(alias_entry.short_code)})
             return jsonify({"error": "That custom alias is already taken"}), 409
 
-        Url.create(original_url=long_url, short_code=custom_alias)
+        created = Url.create(original_url=long_url, short_code=custom_alias)
+        set_cached_short_link(created.short_code, url_row_to_cache_dict(created))
         return jsonify({"short_url": _short_url(custom_alias)}), 201
 
     # Logic for if it already exists within the docker container db just return it
@@ -48,11 +58,13 @@ def shorten():
         (Url.original_url == long_url) & (Url.revoked == False)  # noqa: E712
     )
     if existing:
+        set_cached_short_link(existing.short_code, url_row_to_cache_dict(existing))
         return jsonify({"short_url": _short_url(existing.short_code)})
 
     # Save new link to the Postgres docker container
     new_code = Url.generate_code()
-    Url.create(original_url=long_url, short_code=new_code)
+    created = Url.create(original_url=long_url, short_code=new_code)
+    set_cached_short_link(created.short_code, url_row_to_cache_dict(created))
     return jsonify({"short_url": _short_url(new_code)}), 201
 
 
@@ -69,18 +81,42 @@ def revoke():
         return jsonify({"error": "Unknown short_code"}), 404
 
     if entry.revoked:
+        delete_cached_short_link(short_code)
         return jsonify({"short_code": short_code, "revoked": True}), 200
 
     Url.update(revoked=True).where(Url.id == entry.id).execute()
+    delete_cached_short_link(short_code)
     return jsonify({"short_code": short_code, "revoked": True}), 200
 
 
 # Get endpoint for getting the original URL from the short code. Logic behind redirect
 @url_bp.route('/<short_code>', methods=['GET'])
 def resolve(short_code):
+    cached = get_cached_short_link(short_code)
+    if cached is not None:
+        if not cached.get("active", False):
+            resp = jsonify({"error": "This link has been revoked"})
+            resp.status_code = 410
+            resp.headers["X-Cache"] = "HIT"
+            return resp
+        resp = redirect(cached["url"])
+        resp.headers["X-Cache"] = "HIT"
+        return resp
+
     entry = Url.get_or_none(Url.short_code == short_code)
     if entry is None:
-        return abort(404)
+        resp = jsonify({"error": "Not found"})
+        resp.status_code = 404
+        resp.headers["X-Cache"] = "MISS"
+        return resp
+
+    set_cached_short_link(short_code, url_row_to_cache_dict(entry))
+
     if entry.revoked:
-        return jsonify({"error": "This link has been revoked"}), 410
-    return redirect(entry.original_url)
+        resp = jsonify({"error": "This link has been revoked"})
+        resp.status_code = 410
+        resp.headers["X-Cache"] = "MISS"
+        return resp
+    resp = redirect(entry.original_url)
+    resp.headers["X-Cache"] = "MISS"
+    return resp
