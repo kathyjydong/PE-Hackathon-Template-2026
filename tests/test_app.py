@@ -4,7 +4,7 @@ from pathlib import Path
 import app as app_module
 from peewee import SqliteDatabase
 from app.database import register_db_hooks
-from app.models import ALL_MODELS, Url, User, db
+from app.models import ALL_MODELS, Url, User, db, db_read
 from app.routes import url_shortener
 
 
@@ -40,6 +40,7 @@ def make_client(monkeypatch):
     def _init_sqlite_memory(app):
         sqlite_db = SqliteDatabase(":memory:")
         db.initialize(sqlite_db)
+        db_read.initialize(sqlite_db)
         with app.app_context():
             sqlite_db.create_tables(ALL_MODELS, safe=True)
         register_db_hooks(app)
@@ -56,6 +57,7 @@ def make_client_with_sqlite(monkeypatch, db_path):
 
     def _init_sqlite(app):
         db.initialize(sqlite_db)
+        db_read.initialize(sqlite_db)
 
         with app.app_context():
             sqlite_db.create_tables(ALL_MODELS, safe=True)

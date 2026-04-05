@@ -9,10 +9,12 @@ from peewee import (
     IntegerField,
     Model,
     TextField,
+    IntegerField,
 )
 
 
-db = DatabaseProxy()
+db = DatabaseProxy()       # primary (writes)
+db_read = DatabaseProxy()  # read replica (cache-miss reads)
 
 class BaseModel(Model):
     class Meta:
@@ -40,6 +42,7 @@ class Url(BaseModel):
     event = ForeignKeyField(Event, backref='urls', null=True, on_delete='CASCADE')
     created_by = ForeignKeyField(User, backref='created_urls', null=True, on_delete='CASCADE')
     created_at = DateTimeField(default=datetime.datetime.now)
+    clicks = IntegerField(default=0)
 
     @classmethod
     def generate_code(cls):

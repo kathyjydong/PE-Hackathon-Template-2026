@@ -1,11 +1,15 @@
-name: CI
+name: CI + Deploy
 
 on:
   push:
+    branches:
+      - "**"   # run tests on all branches
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
+    name: Run Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -15,7 +19,7 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
 
       - name: Install uv
         run: |
@@ -23,9 +27,35 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        run: |
-          uv sync
+        run: uv sync
 
       - name: Run tests
+        run: uv run pytest
+
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: test
+
+    # ⬇️ ONLY run on push to main (not PRs)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Configure SSH
         run: |
-          uv run pytest
+          mkdir -p ~/.ssh/
+
+          echo "${{ secrets.DO_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy-key.pem
+          chmod 600 ~/.ssh/deploy-key.pem
+
+          cat >> ~/.ssh/config <<EOF
+          Host my-vps
+            Hostname ${{ secrets.DO_SSH_HOST }}
+            User ${{ secrets.DO_SSH_USER }}
+            IdentityFile ~/.ssh/deploy-key.pem
+            StrictHostKeyChecking no
+          EOF
+
+      - name: Deploy sites
+        run: |
+          ssh my-vps "cd ${{ secrets.DO_DEPLOY_PATH }} && pwd && chmod u+x ./scripts/deploy.sh && ./scripts/deploy.sh"
