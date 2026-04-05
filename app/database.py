@@ -1,6 +1,10 @@
 import os
+import logging
 from peewee import PostgresqlDatabase
 from app.models import db, ALL_MODELS 
+
+
+logger = logging.getLogger(__name__)
 
 def init_db(app):
     # This reads your .env file to talk to the Docker container
@@ -23,10 +27,14 @@ def init_db(app):
             database.execute_sql(
                 "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
             )
-            print("Successfully created database tables in Docker!")
+            logger.info("Database initialized", extra={"component": "database"})
         except Exception as e:
             # If a 'duplicate key' error occurs, it means another clone already finished the setup
-            print(f"Database already initialized by another instance, skipping: {e}")
+            logger.warning(
+                "Database initialization skipped",
+                extra={"component": "database"},
+                exc_info=True,
+            )
 
     @app.before_request
     def _db_connect():

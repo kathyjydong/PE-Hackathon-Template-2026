@@ -220,3 +220,47 @@ curl -i http://localhost:5000/some-missing-short-code
 ## Failure Modes
 
 For the full graceful-failure behavior, chaos testing steps, and live demo checklist, see [Failure Modes](docs/failure-modes.md).
+
+## Kafka Log Streaming (Tier 1 Bronze)
+
+The app now emits structured JSON logs to stdout. You can pipe those logs directly to Kafka so logs are centralized and visible without SSH.
+
+Example JSON log event:
+
+```json
+{
+    "timestamp": "2026-04-04T20:05:00+00:00",
+    "level": "INFO",
+    "component": "api",
+    "message": "Request completed",
+    "node_id": "server-01",
+    "method": "GET",
+    "path": "/health",
+    "status_code": 200,
+    "latency_ms": 2.14
+}
+```
+
+### 1. Create/verify the Kafka topic
+
+```bash
+BOOTSTRAP_SERVER=localhost:9092 ./scripts/create-kafka-topic.sh app-logs
+```
+
+### 2. Stream app logs to Kafka
+
+```bash
+TOPIC_NAME=app-logs BOOTSTRAP_SERVER=localhost:9092 ./scripts/stream-logs-to-kafka.sh
+```
+
+### 3. Consume logs from another terminal/machine
+
+```bash
+TOPIC_NAME=app-logs BOOTSTRAP_SERVER=<server-ip>:9092 FROM_BEGINNING=true ./scripts/consume-kafka-logs.sh
+```
+
+### Optional environment knobs
+
+- `NODE_ID`: identifier included in every JSON log event.
+- `LOG_LEVEL`: logger threshold (default `INFO`).
+- `APP_CMD`: command used by stream script (default `uv run run.py`).

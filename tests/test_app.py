@@ -30,6 +30,7 @@ class DummyField:
 
 def make_client(monkeypatch):
     # Keep app factory isolated from a real Postgres instance.
+    monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
     monkeypatch.setattr(app_module, "init_db", lambda _app: None)
     test_app = app_module.create_app()
     test_app.config["TESTING"] = True
@@ -54,6 +55,7 @@ def make_client_with_sqlite(monkeypatch, db_path):
             if not db.is_closed():
                 db.close()
 
+    monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
     monkeypatch.setattr(app_module, "init_db", _init_sqlite)
     test_app = app_module.create_app()
     test_app.config["TESTING"] = True
