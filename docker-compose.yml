@@ -108,6 +108,8 @@ services:
         esc_url=$$(printf '%s' "$${DISCORD_WEBHOOK_URL}" | sed -e 's/[\\&]/\\\\&/g')
         sed "s|__DISCORD_WEBHOOK_URL__|$${esc_url}|g" /etc/alertmanager/alertmanager.yml >/tmp/alertmanager.yml
         exec /bin/alertmanager --config.file=/tmp/alertmanager.yml
+    env_file:
+      - .env
     environment:
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
