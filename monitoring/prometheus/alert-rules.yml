@@ -1,0 +1,20 @@
+groups:
+  - name: app-watchtower
+    rules:
+      - alert: ServiceDown
+        expr: up{job="app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "App service is down"
+          description: "Prometheus could not scrape the app job for 1 minute."
+
+      - alert: HighErrorRate
+        expr: increase(app_errors_total[1m]) > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error count in the past minute"
+          description: "app_errors_total increased by more than 5 in 1 minute."
