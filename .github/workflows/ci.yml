@@ -56,4 +56,4 @@ jobs:
 
       - name: Deploy sites
         run: |
-          ssh my-vps "cd ${{ secrets.DO_DEPLOY_PATH }} && pwd && ./scripts/deploy.sh"
+          ssh my-vps "cd ${{ secrets.DO_DEPLOY_PATH }} && pwd && chmod u+x ./scripts/deploy.sh && ./scripts/deploy.sh"

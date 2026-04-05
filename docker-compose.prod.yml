@@ -1,5 +1,5 @@
 services:
-# This is how we define the architecture of our system
+# This is how we define the architecture of our systeam
 # 3 components:
   redis:
     image: redis:7-alpine
