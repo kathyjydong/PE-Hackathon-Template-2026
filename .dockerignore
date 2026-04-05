@@ -1,9 +1,20 @@
 # All Files to be ignored by dockerfile blueprint
 
-# Secrets and Local Environments
+# Secrets and local env (never bake into image)
 .env
+.env.*
 .venv
 .git
+*.pem
+*.key
+credentials.json
+*service-account*.json
+
+# Coverage / local tooling
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # Python Cache
 __pycache__/
