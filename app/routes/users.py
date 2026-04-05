@@ -157,7 +157,7 @@ def create_user():
     if error_response:
         return error_response
     try:
-        email, username = _parse_user_payload(payload)
+        username, email = _parse_user_payload(payload)
     except ValueError as exc:
         return jsonify(error=exc.args[0]), 400
 
@@ -177,8 +177,14 @@ def create_user():
     try:
         user = User.create(username=username, email=email, password_hash="")
         return jsonify(_serialize_user(user)), 201
-    except IntegrityError:
-        return jsonify(error={"user": "username or email already exists"}), 409
+    except IntegrityError as exc:
+        detail = str(getattr(exc, "orig", exc))
+        return jsonify(
+            error={
+                "user": "username or email already exists",
+                "detail": detail,
+            }
+        ), 409
 
 
 @users_bp.route("/users/<int:user_id>", methods=["PUT"])
