@@ -1,0 +1,23 @@
+global:
+  resolve_timeout: 1m
+
+route:
+  receiver: oncall-webhook
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 2m
+
+receivers:
+  - name: oncall-webhook
+    discord_configs:
+      # Replace this with your real Discord webhook URL.
+      - webhook_url: https://discord.com/api/webhooks/1490270955183018115/D4_gbxZBkBfcV2yNIpR9lLn7_zXBa00kj5yw_JC2EC9k9lazXY5Z02DPIDYJUC4VTV78
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        message: >-
+          {{ range .Alerts -}}
+          {{ .Annotations.summary }}
+          {{ if .Annotations.description }} - {{ .Annotations.description }}{{ end }}
+          (severity={{ .Labels.severity }})
+          {{ end }}
