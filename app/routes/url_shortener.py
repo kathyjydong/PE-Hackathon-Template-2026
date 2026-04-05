@@ -30,8 +30,21 @@ def _short_url(short_code):
 def _is_valid_web_url(value):
     if not isinstance(value, str):
         return False
-    parsed = urlparse(value.strip())
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    cleaned = value.strip()
+    if not cleaned:
+        return False
+
+    # Reject whitespace anywhere inside the URL string.
+    if any(ch.isspace() for ch in cleaned):
+        return False
+
+    parsed = urlparse(cleaned)
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+        and bool(parsed.hostname)
+    )
 
 
 def _with_cache_headers(resp, label: str):
@@ -49,7 +62,7 @@ def _parse_json_body():
     except BadRequest:
         return None, (jsonify({"error": "Malformed JSON body"}), 400)
 
-    if payload is not None and not isinstance(payload, dict):
+    if not isinstance(payload, dict):
         return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
 
     return payload, None
