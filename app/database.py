@@ -1,4 +1,5 @@
 import os
+import logging
 
 from flask import request
 from peewee import PostgresqlDatabase
@@ -27,6 +28,9 @@ def register_db_hooks(app):
             db.close()
 
 
+
+logger = logging.getLogger(__name__)
+
 def init_db(app):
     database = PostgresqlDatabase(
         os.environ.get("DATABASE_NAME", "hackathon_db"),
@@ -44,8 +48,14 @@ def init_db(app):
             database.execute_sql(
                 "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
             )
-            print("Successfully created database tables in Docker!")
+            logger.info("Database initialized", extra={"component": "database"})
         except Exception as e:
+            # If a 'duplicate key' error occurs, it means another clone already finished the setup
+            logger.warning(
+                "Database initialization skipped",
+                extra={"component": "database"},
+                exc_info=True,
+            )
             print(f"Database already initialized by another instance, skipping: {e}")
 
     register_db_hooks(app)

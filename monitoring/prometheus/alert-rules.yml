@@ -1,0 +1,11 @@
+groups:
+  - name: app-watchtower
+    rules:
+      - alert: HighErrorRate
+        expr: increase(app_errors_total[1m]) > 5
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error count in the past minute"
+          description: "app_errors_total increased by more than 5 in 1 minute."
