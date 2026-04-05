@@ -12,7 +12,9 @@ services:
     build: .
     command: >
       sh -c "
+      rm -rf /tmp/prometheus && mkdir -p /tmp/prometheus &&
       exec uv run gunicorn -w ${GUNICORN_WORKERS:-64}
+      --config gunicorn_conf.py
       --bind unix:/tmp/app.sock
       --bind 0.0.0.0:5000
       --access-logfile -
@@ -29,6 +31,7 @@ services:
       - FLASK_DEBUG=${FLASK_DEBUG}
       - BASE_URL=${BASE_URL}
       - GUNICORN_WORKERS=${GUNICORN_WORKERS}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
     depends_on:
       - redis
     volumes:
@@ -47,6 +50,56 @@ services:
       - socket_data:/tmp   # 🔥 SAME VOLUME
     depends_on:
       - app
+    restart: always
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+    restart: always
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        if [ -z "$${DISCORD_WEBHOOK_URL:-}" ]; then
+          echo "DISCORD_WEBHOOK_URL is not set. Add it to .env before starting alertmanager." >&2
+          exit 1
+        fi
+        esc_url=$$(printf '%s' "$${DISCORD_WEBHOOK_URL}" | sed -e 's/[\\&]/\\\\&/g')
+        sed "s|__DISCORD_WEBHOOK_URL__|$${esc_url}|g" /etc/alertmanager/alertmanager.yml >/tmp/alertmanager.yml
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml
+    environment:
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    restart: always
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - alertmanager
     restart: always
 
 volumes:
