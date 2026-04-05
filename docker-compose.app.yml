@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    # Using gevent for the Gold Tier performance requirement
+    command: uv run gunicorn --worker-class gevent --workers 4 --bind 0.0.0.0:5000 run:app
+    environment:
+      - FLASK_DEBUG=${FLASK_DEBUG}
+      - DATABASE_URL=${DATABASE_URL}
+      - BASE_URL=${BASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    ports:
+      - "5000-5009:5000" 
+    restart: always
