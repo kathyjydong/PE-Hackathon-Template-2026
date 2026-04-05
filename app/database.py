@@ -1,10 +1,11 @@
 import os
 import logging
+from urllib.parse import urlparse
 
 from flask import request
 from playhouse.pool import PooledPostgresqlDatabase
 
-from app.models import ALL_MODELS, db
+from app.models import ALL_MODELS, db, db_read
 
 
 def register_db_hooks(app):
@@ -24,12 +25,45 @@ def register_db_hooks(app):
 
     @app.teardown_appcontext
     def _db_close(exc):
-        if not db.is_closed():
-            db.close()
-
+        for conn in (db, db_read):
+            try:
+                if not conn.is_closed():
+                    conn.close()
+            except Exception:
+                pass
 
 
 logger = logging.getLogger(__name__)
+
+
+def _make_read_replica(primary: PooledPostgresqlDatabase) -> PooledPostgresqlDatabase:
+    """
+    Build a pooled connection to the read replica from DATABASE_READ_URL.
+    Falls back to the primary pool if not configured or on parse error.
+    """
+    read_url = os.environ.get("DATABASE_READ_URL", "").strip()
+    if not read_url:
+        return primary
+
+    try:
+        p = urlparse(read_url)
+        replica = PooledPostgresqlDatabase(
+            p.path.lstrip("/"),
+            host=p.hostname,
+            port=p.port or 5432,
+            user=p.username,
+            password=p.password,
+            max_connections=10,
+            stale_timeout=300,
+        )
+        logger.info("Read replica configured at %s:%s", p.hostname, p.port or 5432,
+                    extra={"component": "database"})
+        return replica
+    except Exception as e:
+        logger.warning("Read replica init failed, falling back to primary: %s", e,
+                       extra={"component": "database"})
+        return primary
+
 
 def init_db(app):
     database = PooledPostgresqlDatabase(
@@ -43,6 +77,7 @@ def init_db(app):
     )
 
     db.initialize(database)
+    db_read.initialize(_make_read_replica(database))
 
     with app.app_context():
         try:
