@@ -9,4 +9,11 @@ if __name__ == "__main__":
     #   FLASK_DEBUG=false uv run run.py
     _debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
     _port = int(os.environ.get("PORT", "5000"))
-    app.run(debug=_debug, port=_port)
+    # threaded=True: default dev server is single-threaded → k6 sees connection stalls / failures.
+    # use_reloader only when debugging so load tests run one process.
+    app.run(
+        debug=_debug,
+        port=_port,
+        threaded=True,
+        use_reloader=_debug,
+    )
