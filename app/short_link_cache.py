@@ -1,11 +1,9 @@
-"""Redis cache for short-link alias resolution. Postgres remains source of truth."""
+"""Redis cache for short-link resolve: plain destination URL per alias (hot path, no JSON)."""
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from typing import Any
 
 import redis
 
@@ -13,53 +11,51 @@ from app.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
-KEY_PREFIX = "short:"
+KEY_PREFIX = "url:"
 DEFAULT_TTL_SECONDS = int(os.environ.get("SHORT_LINK_CACHE_TTL", "3600"))
+
+_DEBUG_RESOLVE = os.environ.get("REDIS_RESOLVE_DEBUG", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 
 def _redis_key(alias: str) -> str:
     return f"{KEY_PREFIX}{alias}"
 
 
-def url_row_to_cache_dict(entry: Any) -> dict[str, Any]:
-    """Build cache payload from a Url model instance."""
-    created = getattr(entry, "created_at", None)
-    created_iso = created.isoformat() if created else None
-    return {
-        "url": entry.original_url,
-        "active": not bool(entry.revoked),
-        "id": entry.id,
-        "createdAt": created_iso,
-        "updatedAt": created_iso,
-    }
-
-
-def get_cached_short_link(alias: str) -> dict[str, Any] | None:
+def get_cached_resolve_url(alias: str) -> str | None:
     """
-    GET short:<alias> from Redis. Returns parsed dict on hit, None on miss or Redis error.
+    GET url:<alias> from Redis. Returns the redirect target string on hit, else None.
+    No JSON parse on the hot path.
     """
     client = get_redis()
     if not client:
         return None
     try:
         raw = client.get(_redis_key(alias))
-        if raw is None:
+        if raw is None or raw == "":
+            if _DEBUG_RESOLVE:
+                logger.info("resolve cache miss alias=%s", alias)
             return None
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else None
-    except (redis.RedisError, json.JSONDecodeError, TypeError, ValueError) as err:
+        if _DEBUG_RESOLVE:
+            logger.info("resolve cache hit alias=%s", alias)
+        return raw
+    except (redis.RedisError, TypeError, ValueError) as err:
         logger.warning("Redis get failed alias=%s: %s", alias, err)
         return None
 
 
-def set_cached_short_link(alias: str, data: dict[str, Any]) -> bool:
-    """SET short:<alias> with TTL. Returns False if Redis unavailable or command fails."""
+def set_cached_resolve_url(alias: str, url: str) -> bool:
+    """SET url:<alias> to the plain URL string with TTL. Skips empty URLs."""
+    if not url:
+        return False
     client = get_redis()
     if not client:
         return False
     try:
-        payload = json.dumps(data, default=str)
-        client.setex(_redis_key(alias), DEFAULT_TTL_SECONDS, payload)
+        client.setex(_redis_key(alias), DEFAULT_TTL_SECONDS, url)
         return True
     except (redis.RedisError, TypeError, ValueError) as err:
         logger.warning("Redis setex failed alias=%s: %s", alias, err)
@@ -67,7 +63,7 @@ def set_cached_short_link(alias: str, data: dict[str, Any]) -> bool:
 
 
 def delete_cached_short_link(alias: str) -> None:
-    """Delete cache key for alias. Swallows Redis errors."""
+    """Invalidate url:<alias>. Swallows Redis errors."""
     client = get_redis()
     if not client:
         return

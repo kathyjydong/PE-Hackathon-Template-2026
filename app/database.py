@@ -9,7 +9,7 @@ from app.models import ALL_MODELS, db
 def register_db_hooks(app):
     """
     Open Postgres only for routes that need it. Skips /health, /, and url.resolve
-    (resolve connects lazily on cache miss — Redis hits avoid TCP+auth to Postgres).
+    (resolve opens DB only on cache miss — Redis hits never touch Postgres).
     """
 
     @app.before_request

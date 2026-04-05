@@ -48,6 +48,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-64}
       - BASE_URL=${BASE_URL}
+      - REDIS_RESOLVE_DEBUG=${REDIS_RESOLVE_DEBUG:-}
 
     depends_on:
       db:
