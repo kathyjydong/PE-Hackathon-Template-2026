@@ -12,11 +12,30 @@ events_bp = Blueprint("events", __name__)
 
 def _parse_json_body():
     if not request.is_json:
-        return None, (jsonify(error={"content_type": "Content-Type must be application/json"}), 415)
+        return None, (
+            jsonify(error={"content_type": "Content-Type must be application/json"}),
+            415,
+        )
+
     try:
-        return request.get_json(silent=False), None
+        payload = request.get_json(silent=False)
     except BadRequest:
         return None, (jsonify(error={"body": "Malformed JSON body"}), 400)
+
+    if not isinstance(payload, dict):
+        return None, (jsonify(error={"body": "Request body must be a JSON object"}), 400)
+
+    return payload, None
+
+
+def _parse_query_int(name):
+    raw = request.args.get(name)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(name)
 
 
 def _parse_datetime(value):
@@ -24,8 +43,11 @@ def _parse_datetime(value):
         return None
     if isinstance(value, datetime):
         return value
+    if not isinstance(value, str):
+        raise ValueError("timestamp/start_time must be a valid datetime string")
 
-    text = str(value).strip()
+    text = value.strip()
+
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
             return datetime.strptime(text, fmt)
@@ -33,28 +55,72 @@ def _parse_datetime(value):
             continue
 
     try:
-        # Handles values such as 2026-04-04T12:00:00Z
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError("timestamp/start_time must be a valid datetime") from exc
 
 
-def _serialize_event(event, url_id=None):
-    description = event.description
-    if isinstance(description, str) and description:
+def _normalize_details(payload):
+    # Canonical alias used by the tests
+    if "details" in payload:
+        details = payload.get("details")
+
+        if details is None:
+            return None
+
+        if isinstance(details, (dict, list)):
+            return json.dumps(details)
+
+        # Accept stringified JSON object/array, but reject loose strings like "hello"
+        if isinstance(details, str):
+            try:
+                parsed = json.loads(details)
+            except (TypeError, ValueError):
+                raise ValueError("details must be a JSON object or array")
+
+            if isinstance(parsed, (dict, list)):
+                return json.dumps(parsed)
+
+            raise ValueError("details must be a JSON object or array")
+
+        raise ValueError("details must be a JSON object or array")
+
+    # Backward-compatible alias
+    description = payload.get("description")
+    if description is None:
+        return None
+    if isinstance(description, (dict, list)):
+        return json.dumps(description)
+    if isinstance(description, str):
+        return description
+
+    raise ValueError("description must be a string, JSON object, or JSON array")
+
+
+def _deserialize_description(value):
+    if isinstance(value, str) and value:
         try:
-            description = json.loads(description)
+            return json.loads(value)
         except (TypeError, ValueError):
-            pass
+            return value
+    return value
+
+
+def _get_event_url_id(event):
+    linked_url = event.urls.order_by(Url.id).first()
+    return linked_url.id if linked_url else None
+
+
+def _serialize_event(event):
+    description = _deserialize_description(event.description)
 
     return {
-        # Expected keys for hackathon tests
         "id": event.id,
         "event_type": event.title,
         "details": description,
         "timestamp": event.start_time.isoformat(timespec="seconds"),
         "user_id": event.host_id,
-        "url_id": url_id,
+        "url_id": _get_event_url_id(event),
 
         # Backward-compatible aliases
         "title": event.title,
@@ -66,8 +132,14 @@ def _serialize_event(event, url_id=None):
 
 @events_bp.route("/events", methods=["GET"])
 def list_events():
-    user_id = request.args.get("user_id", type=int)
-    url_id = request.args.get("url_id", type=int)
+    try:
+        user_id = _parse_query_int("user_id")
+        url_id = _parse_query_int("url_id")
+    except ValueError as exc:
+        field = str(exc)
+        return jsonify(error={field: f"{field} must be an integer"}), 400
+
+    event_type = request.args.get("event_type")
 
     query = Event.select().order_by(Event.id)
 
@@ -77,14 +149,10 @@ def list_events():
     if url_id is not None:
         query = query.join(Url).where(Url.id == url_id).distinct()
 
-    events = []
-    for event in query:
-        associated_url_id = None
-        if url_id is not None:
-            associated_url_id = url_id
-        events.append(_serialize_event(event, associated_url_id))
+    if event_type is not None:
+        query = query.where(Event.title == event_type)
 
-    return jsonify(events), 200
+    return jsonify([_serialize_event(event) for event in query]), 200
 
 
 @events_bp.route("/events", methods=["POST"])
@@ -92,11 +160,9 @@ def create_event():
     payload, error_response = _parse_json_body()
     if error_response:
         return error_response
-    if not isinstance(payload, dict):
-        return jsonify(error={"body": "Request body must be a JSON object"}), 400
 
     host_id = payload.get("host_id", payload.get("user_id"))
-    if not isinstance(host_id, int):
+    if isinstance(host_id, bool) or not isinstance(host_id, int):
         return jsonify(error={"host_id": "host_id or user_id must be an integer"}), 400
 
     host = User.get_or_none(User.id == host_id)
@@ -107,11 +173,12 @@ def create_event():
     if not isinstance(title, str) or not title.strip():
         return jsonify(error={"title": "title or event_type is required"}), 400
 
-    description = payload.get("description", payload.get("details"))
-    if isinstance(description, (dict, list)):
-        description = json.dumps(description)
-    elif description is not None and not isinstance(description, str):
-        return jsonify(error={"description": "description/details must be a string or JSON object"}), 400
+    try:
+        description = _normalize_details(payload)
+    except ValueError as exc:
+        if "details" in payload:
+            return jsonify(error={"details": str(exc)}), 400
+        return jsonify(error={"description": str(exc)}), 400
 
     start_time_raw = payload.get("start_time", payload.get("timestamp"))
     try:
@@ -126,15 +193,16 @@ def create_event():
         host=host,
     )
 
-    associated_url_id = None
     url_id = payload.get("url_id")
     if url_id is not None:
-        if not isinstance(url_id, int):
+        if isinstance(url_id, bool) or not isinstance(url_id, int):
             return jsonify(error={"url_id": "url_id must be an integer"}), 400
+
         url = Url.get_or_none(Url.id == url_id)
         if url is None:
             return jsonify(error={"url_id": "Unknown url"}), 404
-        Url.update(event=event).where(Url.id == url.id).execute()
-        associated_url_id = url.id
 
-    return jsonify(_serialize_event(event, associated_url_id)), 201
+        Url.update(event=event).where(Url.id == url.id).execute()
+
+    event = Event.get_by_id(event.id)
+    return jsonify(_serialize_event(event)), 201
