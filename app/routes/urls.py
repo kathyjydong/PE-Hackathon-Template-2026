@@ -60,6 +60,14 @@ def _generate_unique_short_code():
     raise RuntimeError("Failed to generate a unique short code")
 
 
+def _extract_url_value(payload):
+    if "original_url" in payload:
+        return payload.get("original_url"), "original_url"
+    if "url" in payload:
+        return payload.get("url"), "url"
+    return None, "original_url"
+
+
 @urls_bp.route("", methods=["GET"])
 @urls_bp.route("/", methods=["GET"])
 def list_urls():
@@ -97,15 +105,15 @@ def create_url():
     if not isinstance(payload, dict):
         return jsonify(error={"body": "Request body must be a JSON object"}), 400
 
-    original_url = payload.get("original_url")
+    original_url, url_field = _extract_url_value(payload)
     title = payload.get("title")
     user_id = payload.get("user_id")
 
     if not isinstance(original_url, str) or not original_url.strip():
-        return jsonify(error={"original_url": "original_url is required"}), 400
+        return jsonify(error={url_field: f"{url_field} is required"}), 400
 
     if not _is_valid_web_url(original_url):
-        return jsonify(error={"original_url": "original_url must be a valid http/https URL"}), 400
+        return jsonify(error={url_field: f"{url_field} must be a valid http/https URL"}), 400
 
     if title is not None and not isinstance(title, str):
         return jsonify(error={"title": "title must be a string"}), 400
@@ -160,12 +168,12 @@ def update_url(url_id):
             return jsonify(error={"is_active": "is_active must be a boolean"}), 400
         updates["revoked"] = not is_active
 
-    if "original_url" in payload:
-        original_url = payload.get("original_url")
+    original_url, url_field = _extract_url_value(payload)
+    if original_url is not None:
         if not isinstance(original_url, str) or not original_url.strip():
-            return jsonify(error={"original_url": "original_url must be a non-empty string"}), 400
+            return jsonify(error={url_field: f"{url_field} must be a non-empty string"}), 400
         if not _is_valid_web_url(original_url):
-            return jsonify(error={"original_url": "original_url must be a valid http/https URL"}), 400
+            return jsonify(error={url_field: f"{url_field} must be a valid http/https URL"}), 400
         updates["original_url"] = original_url.strip()
 
     if not updates:
