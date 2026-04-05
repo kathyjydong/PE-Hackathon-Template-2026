@@ -38,7 +38,7 @@ jobs:
     needs: test
 
     # ⬇️ ONLY run on push to main (not PRs)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'pull_request')
 
     steps:
       - name: Configure SSH
