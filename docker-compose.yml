@@ -19,10 +19,17 @@ services:
     restart: always
 
   redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    image: redis:alpine
+    command: redis-server --save 60 1 --loglevel warning # Minimizes logs and saves data every 60s
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: always
+    # No host ports: Redis is only reachable as hostname "redis" from other services on the compose network.
 
 # 2. The Clone Army (Your Flask App)
 # This is what gets scaled up and down based on traffic and where the actual app is
@@ -48,13 +55,14 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-64}
       - BASE_URL=${BASE_URL}
-      - REDIS_RESOLVE_DEBUG=${REDIS_RESOLVE_DEBUG:-}
+      - REDIS_CONNECT_RETRIES=${REDIS_CONNECT_RETRIES:-}
+      - REDIS_CONNECT_DELAY=${REDIS_CONNECT_DELAY:-}
 
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - socket_data:/tmp
     ports:
@@ -84,3 +92,4 @@ services:
 volumes:
   postgres_data:
   socket_data:
+  redis_data:

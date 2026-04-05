@@ -10,7 +10,7 @@ build/
 # Virtual environment
 .venv/
 
-# Environment & local secrets (keep .env.example committed as a template)
+# Environment variables
 .env
 .env.*
 !.env.example
@@ -29,7 +29,7 @@ uv.lock
 *.swo
 *~
 
-# pytest / coverage (local metrics; can embed paths)
+# pytest
 .pytest_cache/
 .coverage
 .coverage.*

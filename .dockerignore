@@ -1,8 +1,7 @@
 # All Files to be ignored by dockerfile blueprint
 
-# Secrets and local env (never bake into image)
+# Secrets and Local Environments
 .env
-.env.*
 .venv
 .git
 *.pem

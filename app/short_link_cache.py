@@ -14,12 +14,6 @@ logger = logging.getLogger(__name__)
 KEY_PREFIX = "url:"
 DEFAULT_TTL_SECONDS = int(os.environ.get("SHORT_LINK_CACHE_TTL", "3600"))
 
-_DEBUG_RESOLVE = os.environ.get("REDIS_RESOLVE_DEBUG", "").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-)
-
 
 def _redis_key(alias: str) -> str:
     return f"{KEY_PREFIX}{alias}"
@@ -36,11 +30,7 @@ def get_cached_resolve_url(alias: str) -> str | None:
     try:
         raw = client.get(_redis_key(alias))
         if raw is None or raw == "":
-            if _DEBUG_RESOLVE:
-                logger.info("resolve cache miss alias=%s", alias)
             return None
-        if _DEBUG_RESOLVE:
-            logger.info("resolve cache hit alias=%s", alias)
         return raw
     except (redis.RedisError, TypeError, ValueError) as err:
         logger.warning("Redis get failed alias=%s: %s", alias, err)
