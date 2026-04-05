@@ -12,7 +12,8 @@ from peewee import (
 )
 
 
-db = DatabaseProxy()
+db = DatabaseProxy()       # primary (writes)
+db_read = DatabaseProxy()  # read replica (cache-miss reads)
 
 class BaseModel(Model):
     class Meta:

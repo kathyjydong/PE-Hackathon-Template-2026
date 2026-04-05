@@ -2,11 +2,15 @@ import os
 import re
 
 from flask import Blueprint, request, jsonify, redirect
-from app.models import Url, db
+from app.models import Url, db, db_read
+from app.models.schema import Url as _UrlSchema  # real Peewee model for bind_ctx
 from app.short_link_cache import (
     delete_cached_short_link,
+    delete_cached_url_to_code,
     get_cached_resolve_url,
+    get_cached_url_to_code,
     set_cached_resolve_url,
+    set_cached_url_to_code,
 )
 
 url_bp = Blueprint('url', __name__)
@@ -29,8 +33,12 @@ def _with_cache_headers(resp, label: str):
     return resp
 
 
-# Method to generate a short code for URL
-# Will be changed later for things like custom url and password protected urls but this is for MVP
+def _cache_url_pair(short_code: str, original_url: str) -> None:
+    """Populate both forward and reverse Redis entries for a URL pair."""
+    set_cached_resolve_url(short_code, original_url)
+    set_cached_url_to_code(original_url, short_code)
+
+
 @url_bp.route('/shorten', methods=['POST'])
 def shorten():
     data = request.get_json(silent=True) or {}
@@ -49,29 +57,41 @@ def shorten():
         alias_entry = Url.get_or_none(Url.short_code == custom_alias)
         if alias_entry:
             if not alias_entry.revoked and alias_entry.original_url == long_url:
-                set_cached_resolve_url(
-                    alias_entry.short_code, alias_entry.original_url
-                )
+                _cache_url_pair(alias_entry.short_code, alias_entry.original_url)
                 return jsonify({"short_url": _short_url(alias_entry.short_code)})
             return jsonify({"error": "That custom alias is already taken"}), 409
 
         created = Url.create(original_url=long_url, short_code=custom_alias)
-        set_cached_resolve_url(created.short_code, created.original_url)
+        _cache_url_pair(created.short_code, created.original_url)
         return jsonify({"short_url": _short_url(custom_alias)}), 201
 
-    # Logic for if it already exists within the docker container db just return it
-    existing = Url.get_or_none(
-        (Url.original_url == long_url) & (Url.revoked == False)  # noqa: E712
-    )
-    if existing:
-        set_cached_resolve_url(existing.short_code, existing.original_url)
-        return jsonify({"short_url": _short_url(existing.short_code)})
+    # Hot path: check reverse cache before hitting the read replica
+    cached_code = get_cached_url_to_code(long_url)
+    if cached_code is not None:
+        return _with_cache_headers(
+            jsonify({"short_url": _short_url(cached_code)}), "HIT"
+        )
 
-    # Save new link to the Postgres docker container
+    # Cache miss: query read replica for existing non-revoked entry
+    db_read.connect(reuse_if_open=True)
+    with db_read.bind_ctx([Url]):
+        existing = Url.get_or_none(
+            (Url.original_url == long_url) & (Url.revoked == False)  # noqa: E712
+        )
+
+    if existing:
+        _cache_url_pair(existing.short_code, existing.original_url)
+        return _with_cache_headers(
+            jsonify({"short_url": _short_url(existing.short_code)}), "MISS"
+        )
+
+    # New URL — write to primary
     new_code = Url.generate_code()
     created = Url.create(original_url=long_url, short_code=new_code)
-    set_cached_resolve_url(created.short_code, created.original_url)
-    return jsonify({"short_url": _short_url(new_code)}), 201
+    _cache_url_pair(created.short_code, created.original_url)
+    return _with_cache_headers(
+        jsonify({"short_url": _short_url(new_code)}), "MISS"
+    ), 201
 
 
 @url_bp.route("/revoke", methods=["POST"])
@@ -88,23 +108,27 @@ def revoke():
 
     if entry.revoked:
         delete_cached_short_link(short_code)
+        delete_cached_url_to_code(entry.original_url)
         return jsonify({"short_code": short_code, "revoked": True}), 200
 
     Url.update(revoked=True).where(Url.id == entry.id).execute()
     delete_cached_short_link(short_code)
+    delete_cached_url_to_code(entry.original_url)
     return jsonify({"short_code": short_code, "revoked": True}), 200
 
 
-# Get endpoint for getting the original URL from the short code. Logic behind redirect
 @url_bp.route('/<short_code>', methods=['GET'])
 def resolve(short_code):
-    # Hot path: Redis string only → redirect + X-Cache (no DB, no JSON).
+    # Hot path: Redis forward cache → redirect with no DB touch
     target_url = get_cached_resolve_url(short_code)
     if target_url is not None:
         return _with_cache_headers(redirect(target_url), "HIT")
 
-    db.connect(reuse_if_open=True)
-    entry = Url.get_or_none(Url.short_code == short_code)
+    # Cache miss: use read replica (single-writer, multi-reader pattern)
+    db_read.connect(reuse_if_open=True)
+    with db_read.bind_ctx([Url]):
+        entry = Url.get_or_none(Url.short_code == short_code)
+
     if entry is None:
         resp = jsonify({"error": "Not found"})
         resp.status_code = 404
@@ -115,5 +139,6 @@ def resolve(short_code):
         resp.status_code = 410
         return _with_cache_headers(resp, "MISS")
 
-    set_cached_resolve_url(short_code, entry.original_url)
+    # Populate both caches on miss so the next request is served from Redis
+    _cache_url_pair(short_code, entry.original_url)
     return _with_cache_headers(redirect(entry.original_url), "MISS")

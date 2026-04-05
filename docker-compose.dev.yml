@@ -14,7 +14,7 @@ services:
       - db_data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # 🟡 Read Replica (simulated)
+  # 🟡 Read Replica (simulated — separate Postgres instance)
   db_read:
     image: postgres:15
     environment:
@@ -34,6 +34,13 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
+
+  # App override: point reads at the read replica
+  app:
+    environment:
+      - DATABASE_READ_URL=postgresql://postgres:postgres@db_read:5432/hackathon_db
+    depends_on:
+      - db_read
 
 volumes:
   db_data:
