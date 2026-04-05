@@ -39,12 +39,14 @@ services:
           run:app
     environment:
       - FLASK_DEBUG=${FLASK_DEBUG:-false}
-      - DATABASE_URL=postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@db:${DATABASE_PORT}/${DATABASE_NAME}
+      # Inside Compose, Postgres always listens on 5432. Do not use ${DATABASE_PORT}
+      # here — .env often sets 25060 (managed DB) for host tools, which breaks db:25060.
+      - DATABASE_URL=postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${DATABASE_NAME}
       - DATABASE_HOST=db
       - DATABASE_USER=${DATABASE_USER}
       - DATABASE_PASSWORD=${DATABASE_PASSWORD}
       - DATABASE_NAME=${DATABASE_NAME}
-      - DATABASE_PORT=${DATABASE_PORT}
+      - DATABASE_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-64}
       - BASE_URL=${BASE_URL}
