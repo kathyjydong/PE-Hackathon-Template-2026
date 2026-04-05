@@ -1,161 +1,186 @@
-# Troubleshooting Playbook
+# Failure Modes
 
-This document is a practical "if X happens, try Y" runbook for local and demo-time issues.
+This runbook documents how the app behaves under common failures and how to demo recovery.
 
-## Quick Triage (Run First)
+## Graceful Failure (Bad Input)
 
-```bash
-docker compose ps -a
-docker compose logs --tail=120 app
-docker compose logs --tail=80 db
-docker compose config
-```
+Goal: bad input should return clean JSON errors (not stack traces and not HTML error pages).
 
-Use this to answer four questions quickly:
-
-1. Is the service up?
-2. Did `app` crash or fail at startup?
-3. Is the database healthy?
-4. Is the compose file valid?
-
-## If X Happens, Try Y
-
-### Compose fails before starting
-
-If you see:
-
-- `mapping key "environment" already defined`
-
-Try:
-
-1. Remove duplicate keys in `docker-compose.yml`.
-2. Validate with `docker compose config`.
-3. Retry `docker compose up -d --build`.
-
-### Compose says a volume is undefined
-
-If you see:
-
-- `service "app" refers to undefined volume socket_data`
-
-Try:
-
-1. Add top-level `volumes:` entries for all referenced named volumes.
-2. Ensure both `postgres_data` and `socket_data` are declared.
-3. Retry `docker compose up -d --build`.
-
-### BASE_URL warning appears
-
-If you see:
-
-- `The "BASE_URL" variable is not set. Defaulting to a blank string.`
-
-Try:
-
-1. Set once in shell: `export BASE_URL=http://localhost`
-2. Or persist in `.env`: `BASE_URL=http://localhost`
-
-### App returns JSON, but you cannot see logs
-
-If you see:
-
-- `curl` responses but no log lines where expected
-
-Try:
-
-1. Keep one terminal on logs:
+### Example 1: Missing URL
 
 ```bash
-docker compose logs -f app
+curl -i -X POST http://localhost/shorten \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
-2. Generate traffic from another terminal:
+Expected:
+
+- HTTP 400
+- JSON body:
+
+```json
+{"error":"URL is missing"}
+```
+
+### Example 2: Garbage JSON payload
 
 ```bash
-PORT=$(docker compose port app 5000 | awk -F: '{print $2}')
-curl -i "http://localhost:${PORT}/health"
-curl -i "http://localhost:${PORT}/does-not-exist"
+curl -i -X POST http://localhost/shorten \
+  -H "Content-Type: application/json" \
+  -d '{not-valid-json'
 ```
 
-### Chaos demo does not show restart
+Expected:
 
-If you see:
+- HTTP 400
+- JSON body:
 
-- `docker compose kill app` leaves app down
+```json
+{"error":"URL is missing"}
+```
 
-Try:
-
-1. Use process crash instead of manual container kill:
+### Example 3: Invalid custom alias
 
 ```bash
-docker compose exec -T app sh -lc 'kill -9 1'
+curl -i -X POST http://localhost/shorten \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com","custom_alias":"bad alias!"}'
 ```
 
-2. Watch recovery:
+Expected:
+
+- HTTP 400
+- JSON body with validation error message
+
+## Chaos Mode (Container Kill + Auto Restart)
+
+The project uses Docker Compose with restart policies (`restart: always`) in `docker-compose.yml` for `db`, `app`, and `nginx`.
+
+### Start the stack
 
 ```bash
-docker compose ps app
+docker compose up -d --build
 ```
 
-### Unexpected 500 with DB column errors
-
-If you see:
-
-- `column t1.clicks does not exist` (or similar schema drift)
-
-Try:
-
-1. Apply idempotent schema fixes:
+### Kill the app container
 
 ```bash
-docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER TABLE url ADD COLUMN IF NOT EXISTS clicks INTEGER NOT NULL DEFAULT 0; ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE; ALTER TABLE url ADD COLUMN IF NOT EXISTS title VARCHAR(255);"'
+docker compose kill app
 ```
 
-2. Restart app:
+### Observe automatic recovery
 
 ```bash
-docker compose restart app
+docker compose ps
 ```
 
-### `curl http://localhost:PORT/...` fails
+Expected:
 
-If you see:
+- The `app` service returns to `Up` automatically.
+- Traffic continues once app restarts.
 
-- You used literal `PORT` text instead of a real number
-
-Try:
+Optional live watch:
 
 ```bash
-PORT=$(docker compose port app 5000 | awk -F: '{print $2}')
-curl -i "http://localhost:${PORT}/health"
+while true; do docker compose ps; sleep 1; clear; done
 ```
 
-## Verification Checks
+## Live Demo Checklist
 
-After any fix, verify fast with:
+1. Start stack: `docker compose up -d --build`
+2. Verify health: `curl -i http://localhost/health`
+3. Send garbage data to `/shorten` and show clean JSON 400.
+4. Kill app container: `docker compose kill app`
+5. Show container auto-restarts with `docker compose ps`.
+6. Hit health again to show service recovered: `curl -i http://localhost/health`
 
-```bash
-./scripts/verify-resilience.sh
-```
+## Notes
 
-Expected result:
+- CI/CD deployment is blocked on failing tests in `.github/workflows/cd.yml`.
+- Error handlers are configured to return JSON for HTTP errors and unexpected exceptions.
 
-- Summary with all checks passing.
+## Decision Log
 
-## Incident Notes From Today
+This section records major technical choices and the reason each was selected.
 
-1. Duplicate `environment` in compose caused YAML parse failure.
-   - Fix: removed duplicate key.
-2. Missing `socket_data` volume declaration blocked stack startup.
-   - Fix: declared required named volumes.
-3. Manual `docker compose kill app` did not reliably demonstrate restart behavior.
-   - Fix: switched chaos demo to PID 1 crash command.
-4. DB schema drift (`url.clicks` missing) produced 500 errors.
-   - Fix: ran idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` commands.
-5. Confusion between API response output and app logs.
-   - Fix: standardized two-terminal workflow (one for logs, one for requests).
+### Decision: Use Redis for short-link resolve cache
 
-## References
+Context:
 
-- CI/CD deploy gate: `.github/workflows/cd.yml`
-- Emergency runbook: [In Case of Emergency](in-case-of-emergency.md)
+- The hottest endpoint is `GET /<short_code>`.
+- Repeated reads for the same short code can bottleneck on database lookups under load.
+
+Choice:
+
+- Cache `short_code -> original_url` in Redis.
+- On resolve:
+  - Cache hit: redirect immediately.
+  - Cache miss: read from DB, then write-through into cache.
+
+Why this choice:
+
+- Reduces DB round-trips on hot keys.
+- Lowers p95 latency on repeated resolves.
+- Straightforward invalidation path on revoke/delete.
+
+Tradeoffs:
+
+- Added operational dependency (Redis service health matters).
+- Need cache invalidation correctness on revoke/update/delete.
+- Slight complexity increase in resolve path.
+
+Alternatives considered:
+
+- No cache (simpler, but higher DB pressure and slower hot-path latency).
+- In-process cache only (faster local reads, but not shared across scaled app instances).
+
+### Decision: Use Nginx as reverse proxy + load balancer
+
+Context:
+
+- The app is scaled to multiple workers/containers.
+- Need one stable public entrypoint and predictable routing behavior.
+
+Choice:
+
+- Place Nginx in front of Flask app containers.
+- Use `least_conn` balancing strategy.
+
+Why this choice:
+
+- Simple and proven L7 proxy for hackathon-scale deployment.
+- Supports centralized headers, forwarding, and TLS termination.
+- Enables one public host/port while scaling app replicas behind it.
+
+Tradeoffs:
+
+- Another hop in the request path.
+- Requires proxy config maintenance (headers, timeouts, TLS file paths).
+
+Alternatives considered:
+
+- Directly exposing app container(s) (less control, weaker production posture).
+- Cloud-managed LB only (good option, but less local reproducibility for team debugging).
+
+### Decision: Keep strict request validation at route boundaries
+
+Context:
+
+- Hidden tests send malformed JSON, wrong content type, and invalid URL values.
+
+Choice:
+
+- Validate `Content-Type`, JSON shape, and URL format before DB writes.
+- Return 400/415 with JSON error payloads.
+
+Why this choice:
+
+- Prevents crashing on malformed input.
+- Produces predictable API behavior for graders and clients.
+- Blocks invalid records from entering persistence.
+
+Tradeoffs:
+
+- Slightly more verbose route code.
+- Need consistent validation across parallel endpoints (`/shorten` and `/urls`).
