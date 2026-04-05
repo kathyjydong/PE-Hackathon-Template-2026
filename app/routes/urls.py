@@ -39,8 +39,22 @@ def _serialize_url(item):
 def _is_valid_web_url(value):
     if not isinstance(value, str):
         return False
-    parsed = urlparse(value.strip())
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    cleaned = value.strip()
+    if not cleaned:
+        return False
+
+    # Reject whitespace anywhere inside the URL string
+    if any(ch.isspace() for ch in cleaned):
+        return False
+
+    parsed = urlparse(cleaned)
+
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+        and bool(parsed.hostname)
+    )
 
 
 def _parse_json_body():
@@ -86,13 +100,11 @@ def _extract_url_value(payload):
     return None, "original_url", False
 
 
-def _validate_url_field(value, field_name, required=False):
-    if value is None:
-        if required:
-            raise ValueError(f"{field_name} is required")
-        return None
-
+def _validate_url_field(value, field_name):
     if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a valid http/https URL")
+
+    if value is None:
         raise ValueError(f"{field_name} must be a valid http/https URL")
 
     if not isinstance(value, str):
@@ -100,8 +112,6 @@ def _validate_url_field(value, field_name, required=False):
 
     cleaned = value.strip()
     if not cleaned:
-        if required:
-            raise ValueError(f"{field_name} is required")
         raise ValueError(f"{field_name} must be a valid http/https URL")
 
     if not _is_valid_web_url(cleaned):
@@ -156,7 +166,7 @@ def create_url():
         return jsonify(error={url_field: f"{url_field} is required"}), 400
 
     try:
-        original_url = _validate_url_field(original_url_raw, url_field, required=True)
+        original_url = _validate_url_field(original_url_raw, url_field)
     except ValueError as exc:
         return jsonify(error={url_field: str(exc)}), 400
 
@@ -215,7 +225,7 @@ def update_url(url_id):
     original_url_raw, url_field, url_present = _extract_url_value(payload)
     if url_present:
         try:
-            updates["original_url"] = _validate_url_field(original_url_raw, url_field, required=True)
+            updates["original_url"] = _validate_url_field(original_url_raw, url_field)
         except ValueError as exc:
             return jsonify(error={url_field: str(exc)}), 400
 
