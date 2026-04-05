@@ -1,102 +1,161 @@
-# Failure Modes
+# Troubleshooting Playbook
 
-This runbook documents how the app behaves under common failures and how to demo recovery.
+This document is a practical "if X happens, try Y" runbook for local and demo-time issues.
 
-## Graceful Failure (Bad Input)
-
-Goal: bad input should return clean JSON errors (not stack traces and not HTML error pages).
-
-### Example 1: Missing URL
+## Quick Triage (Run First)
 
 ```bash
-curl -i -X POST http://localhost/shorten \
-  -H "Content-Type: application/json" \
-  -d '{}'
+docker compose ps -a
+docker compose logs --tail=120 app
+docker compose logs --tail=80 db
+docker compose config
 ```
 
-Expected:
+Use this to answer four questions quickly:
 
-- HTTP 400
-- JSON body:
+1. Is the service up?
+2. Did `app` crash or fail at startup?
+3. Is the database healthy?
+4. Is the compose file valid?
 
-```json
-{"error":"URL is missing"}
-```
+## If X Happens, Try Y
 
-### Example 2: Garbage JSON payload
+### Compose fails before starting
+
+If you see:
+
+- `mapping key "environment" already defined`
+
+Try:
+
+1. Remove duplicate keys in `docker-compose.yml`.
+2. Validate with `docker compose config`.
+3. Retry `docker compose up -d --build`.
+
+### Compose says a volume is undefined
+
+If you see:
+
+- `service "app" refers to undefined volume socket_data`
+
+Try:
+
+1. Add top-level `volumes:` entries for all referenced named volumes.
+2. Ensure both `postgres_data` and `socket_data` are declared.
+3. Retry `docker compose up -d --build`.
+
+### BASE_URL warning appears
+
+If you see:
+
+- `The "BASE_URL" variable is not set. Defaulting to a blank string.`
+
+Try:
+
+1. Set once in shell: `export BASE_URL=http://localhost`
+2. Or persist in `.env`: `BASE_URL=http://localhost`
+
+### App returns JSON, but you cannot see logs
+
+If you see:
+
+- `curl` responses but no log lines where expected
+
+Try:
+
+1. Keep one terminal on logs:
 
 ```bash
-curl -i -X POST http://localhost/shorten \
-  -H "Content-Type: application/json" \
-  -d '{not-valid-json'
+docker compose logs -f app
 ```
 
-Expected:
-
-- HTTP 400
-- JSON body:
-
-```json
-{"error":"URL is missing"}
-```
-
-### Example 3: Invalid custom alias
+2. Generate traffic from another terminal:
 
 ```bash
-curl -i -X POST http://localhost/shorten \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com","custom_alias":"bad alias!"}'
+PORT=$(docker compose port app 5000 | awk -F: '{print $2}')
+curl -i "http://localhost:${PORT}/health"
+curl -i "http://localhost:${PORT}/does-not-exist"
 ```
 
-Expected:
+### Chaos demo does not show restart
 
-- HTTP 400
-- JSON body with validation error message
+If you see:
 
-## Chaos Mode (Container Kill + Auto Restart)
+- `docker compose kill app` leaves app down
 
-The project uses Docker Compose with restart policies (`restart: always`) in `docker-compose.yml` for `db`, `app`, and `nginx`.
+Try:
 
-### Start the stack
+1. Use process crash instead of manual container kill:
 
 ```bash
-docker compose up -d --build
+docker compose exec -T app sh -lc 'kill -9 1'
 ```
 
-### Kill the app container
+2. Watch recovery:
 
 ```bash
-docker compose kill app
+docker compose ps app
 ```
 
-### Observe automatic recovery
+### Unexpected 500 with DB column errors
+
+If you see:
+
+- `column t1.clicks does not exist` (or similar schema drift)
+
+Try:
+
+1. Apply idempotent schema fixes:
 
 ```bash
-docker compose ps
+docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER TABLE url ADD COLUMN IF NOT EXISTS clicks INTEGER NOT NULL DEFAULT 0; ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE; ALTER TABLE url ADD COLUMN IF NOT EXISTS title VARCHAR(255);"'
 ```
 
-Expected:
-
-- The `app` service returns to `Up` automatically.
-- Traffic continues once app restarts.
-
-Optional live watch:
+2. Restart app:
 
 ```bash
-while true; do docker compose ps; sleep 1; clear; done
+docker compose restart app
 ```
 
-## Checklist
+### `curl http://localhost:PORT/...` fails
 
-1. Start stack: `docker compose up -d --build`
-2. Verify health: `curl -i http://localhost/health`
-3. Send garbage data to `/shorten` and show clean JSON 400.
-4. Kill app container: `docker compose kill app`
-5. Show container auto-restarts with `docker compose ps`.
-6. Hit health again to show service recovered: `curl -i http://localhost/health`
+If you see:
 
-## Notes
+- You used literal `PORT` text instead of a real number
 
-- CI/CD deployment is blocked on failing tests in `.github/workflows/cd.yml`.
-- Error handlers are configured to return JSON for HTTP errors and unexpected exceptions.
-- Emergency response runbook: [In Case of Emergency](in-case-of-emergency.md)
+Try:
+
+```bash
+PORT=$(docker compose port app 5000 | awk -F: '{print $2}')
+curl -i "http://localhost:${PORT}/health"
+```
+
+## Verification Checks
+
+After any fix, verify fast with:
+
+```bash
+./scripts/verify-resilience.sh
+```
+
+Expected result:
+
+- Summary with all checks passing.
+
+## Incident Notes From Today
+
+1. Duplicate `environment` in compose caused YAML parse failure.
+   - Fix: removed duplicate key.
+2. Missing `socket_data` volume declaration blocked stack startup.
+   - Fix: declared required named volumes.
+3. Manual `docker compose kill app` did not reliably demonstrate restart behavior.
+   - Fix: switched chaos demo to PID 1 crash command.
+4. DB schema drift (`url.clicks` missing) produced 500 errors.
+   - Fix: ran idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` commands.
+5. Confusion between API response output and app logs.
+   - Fix: standardized two-terminal workflow (one for logs, one for requests).
+
+## References
+
+- CI/CD deploy gate: `.github/workflows/cd.yml`
+- Emergency runbook: [In Case of Emergency](in-case-of-emergency.md)
