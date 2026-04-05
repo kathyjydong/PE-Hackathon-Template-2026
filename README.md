@@ -342,6 +342,16 @@ Restore service:
 docker compose start app
 ```
 
+### Sherlock tip
+
+`HighErrorRate` only counts 5xx responses and unhandled exceptions. A 404 like `/does-not-exist` will not trigger it.
+Use a DB-backed route while the database is stopped if you want to demo that alert.
+
+### Runbook
+
+For incident response and Sherlock-style diagnosis, see [In Case of Emergency](docs/in-case-of-emergency.md).
+The Sherlock exercise section includes exact commands and expected dashboard/log clues.
+
 ### Golden Signals dashboard
 
 Grafana auto-loads `Watchtower - Golden Signals` from:
