@@ -97,8 +97,19 @@ services:
 
   alertmanager:
     image: prom/alertmanager:latest
+    entrypoint: /bin/sh
     command:
-      - --config.file=/etc/alertmanager/alertmanager.yml
+      - -c
+      - |
+        if [ -z "$${DISCORD_WEBHOOK_URL:-}" ]; then
+          echo "DISCORD_WEBHOOK_URL is not set. Add it to .env before starting alertmanager." >&2
+          exit 1
+        fi
+        esc_url=$$(printf '%s' "$${DISCORD_WEBHOOK_URL}" | sed -e 's/[\\&]/\\\\&/g')
+        sed "s|__DISCORD_WEBHOOK_URL__|$${esc_url}|g" /etc/alertmanager/alertmanager.yml >/tmp/alertmanager.yml
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml
+    environment:
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:

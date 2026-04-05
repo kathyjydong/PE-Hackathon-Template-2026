@@ -306,11 +306,10 @@ These are evaluated every 10s. You can view alert state in Prometheus under Aler
 
 This project includes Alertmanager and forwards alerts to a webhook channel (Discord/Slack webhook URL).
 
-1. Set your webhook URL in `monitoring/alertmanager/alertmanager.yml`:
+1. Set your webhook URL in `.env` (this file is gitignored):
 
 ```bash
-# Replace the placeholder URL in oncall-webhook.webhook_configs.url
-# with your real Discord/Slack webhook URL.
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
 ```
 
 2. Start monitoring stack:

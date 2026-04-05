@@ -11,8 +11,7 @@ route:
 receivers:
   - name: oncall-webhook
     discord_configs:
-      # Replace this with your real Discord webhook URL.
-      - webhook_url: https://discord.com/api/webhooks/1490270955183018115/D4_gbxZBkBfcV2yNIpR9lLn7_zXBa00kj5yw_JC2EC9k9lazXY5Z02DPIDYJUC4VTV78
+      - webhook_url: __DISCORD_WEBHOOK_URL__
         send_resolved: true
         title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
         message: >-
