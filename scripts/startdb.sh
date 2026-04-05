@@ -1,57 +1,51 @@
 #!/usr/bin/env bash
-# Use this script to start a docker container for a local development database
 
-# TO RUN ON WINDOWS:
-# 1. Install WSL (Windows Subsystem for Linux) - https://learn.microsoft.com/en-us/windows/wsl/install
-# 2. Install Docker Desktop for Windows - https://docs.docker.com/docker-for-windows/install/
-# 3. Open WSL - `wsl`
-# 4. Run this script - `./start-database.sh`
+# 🚀 Start local dev infra (Postgres + Redis via docker-compose)
 
-# On Linux and macOS you can run this script directly - `./start-database.sh`
+COMPOSE_FILE="docker-compose.dev.yml"
 
-DB_CONTAINER_NAME="pe-hackathon-container"
-
-if ! [ -x "$(command -v docker)" ]; then
-	echo -e "Docker is not installed. Please install docker and try again.\nDocker install guide: https://docs.docker.com/engine/install/"
-	exit 1
+# 🔍 Check Docker
+if ! command -v docker &> /dev/null; then
+  echo -e "❌ Docker is not installed.\nInstall guide: https://docs.docker.com/engine/install/"
+  exit 1
 fi
 
-if [ "$(docker ps -q -f name=$DB_CONTAINER_NAME)" ]; then
-	echo "Database container '$DB_CONTAINER_NAME' already running"
-	exit 0
+# 🔍 Detect compose command (v1 vs v2)
+if command -v docker-compose &> /dev/null; then
+  COMPOSE_CMD="docker-compose"
+elif docker compose version &> /dev/null 2>&1; then
+  COMPOSE_CMD="docker compose"
+else
+  echo "❌ Docker Compose not found"
+  exit 1
 fi
 
-if [ "$(docker ps -q -a -f name=$DB_CONTAINER_NAME)" ]; then
-	docker start "$DB_CONTAINER_NAME"
-	echo "Existing database container '$DB_CONTAINER_NAME' started"
-	exit 0
+# 🔍 Ensure compose file exists
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo "❌ $COMPOSE_FILE not found"
+  exit 1
 fi
 
-# import env variables from .env
-set -a
-source .env
-
-DB_PASSWORD="$DATABASE_PASSWORD"
-DB_NAME="$DATABASE_NAME"
-DB_USER="$DATABASE_USER"
-DB_PORT="${DATABASE_PORT:-5432}"
-
-if [ "$DB_PASSWORD" = "postgres" ]; then
-	echo "You are using the default database password"
-	read -p "Should we generate a random password for you? [y/N]: " -r REPLY
-	if ! [[ $REPLY =~ ^[Yy]$ ]]; then
-		echo "Please set a password in the .env file and try again"
-		exit 1
-	fi
-	# Generate a random URL-safe password
-	DB_PASSWORD=$(openssl rand -base64 12 | tr '+/' '-_')
-	sed -i -e "s#^DATABASE_PASSWORD=.*#DATABASE_PASSWORD=$DB_PASSWORD#" .env
+# 📥 Load env (optional but useful)
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
 fi
 
-docker run -d \
-	--name $DB_CONTAINER_NAME \
-	-e POSTGRES_PASSWORD="$DB_PASSWORD" \
-	-e POSTGRES_USER="$DB_USER" \
-	-e POSTGRES_DB="$DB_NAME" \
-	-p "$DB_PORT":5432 \
-	docker.io/postgres && echo "Database container '$DB_CONTAINER_NAME' was successfully created"
+echo "🚀 Starting local database + redis..."
+
+# ▶️ Start services
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d
+
+# 🔍 Check status
+sleep 2
+$COMPOSE_CMD -f "$COMPOSE_FILE" ps
+
+echo ""
+echo "✅ Services started!"
+echo ""
+echo "📡 Connection info:"
+echo "Postgres (write): postgresql://postgres:postgres@localhost:5432/hackathon_db"
+echo "Postgres (read):  postgresql://postgres:postgres@localhost:5433/hackathon_db"
+echo "Redis:            redis://:${REDIS_PASSWORD:-devpassword}@localhost:6379/0"
