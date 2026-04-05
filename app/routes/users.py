@@ -76,6 +76,17 @@ def _parse_user_payload(payload):
     return username, email
 
 
+def _reset_user_id_sequence():
+    User._meta.database.execute_sql(
+        """
+        SELECT setval(
+            pg_get_serial_sequence('"user"', 'id'),
+            COALESCE((SELECT MAX(id) FROM "user"), 1),
+            true
+        );
+        """
+    )
+
 @users_bp.route("/users/bulk", methods=["POST"])
 def bulk_load_users():
     uploaded = request.files.get("file")
@@ -122,6 +133,7 @@ def bulk_load_users():
     with User._meta.database.atomic():
         for batch in chunked(rows, 100):
             User.insert_many(batch).on_conflict_ignore().execute()
+        _reset_user_id_sequence()
 
     inserted = User.select().count() - before_count
     return jsonify(count=inserted), 201
