@@ -4,10 +4,15 @@ import re
 from datetime import datetime
 from urllib.parse import urlparse
 
-from flask import Blueprint, abort, jsonify, redirect, request
+from flask import Blueprint, jsonify, redirect, request
 from werkzeug.exceptions import BadRequest
 
-from app.models import Event, Url, User
+from app.models import Event, Url, User, db
+from app.short_link_cache import (
+    delete_cached_short_link,
+    get_cached_resolve_url,
+    set_cached_resolve_url,
+)
 
 url_bp = Blueprint("url", __name__)
 
@@ -27,6 +32,13 @@ def _is_valid_web_url(value):
         return False
     parsed = urlparse(value.strip())
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _with_cache_headers(resp, label: str):
+    """HIT/MISS for k6 and proxies; duplicate header helps clients that drop X-Cache."""
+    resp.headers["X-Cache"] = label
+    resp.headers["X-Cache-Status"] = label
+    return resp
 
 
 def _parse_json_body():
@@ -53,7 +65,11 @@ def _generate_unique_code():
 
 def _log_event_for_url(entry, event_type, details=None):
     # Event.host is required, so only log when this URL has an owner.
-    if entry.created_by_id is None:
+    if getattr(entry, "created_by_id", None) is None:
+        return None
+
+    host = getattr(entry, "created_by", None)
+    if host is None:
         return None
 
     description = None
@@ -64,7 +80,7 @@ def _log_event_for_url(entry, event_type, details=None):
         title=event_type,
         description=description,
         start_time=datetime.now(),
-        host=entry.created_by,
+        host=host,
     )
 
     Url.update(event=event).where(Url.id == entry.id).execute()
@@ -107,6 +123,7 @@ def shorten():
         alias_entry = Url.get_or_none(Url.short_code == custom_alias)
         if alias_entry:
             if not alias_entry.revoked and alias_entry.original_url == long_url:
+                set_cached_resolve_url(alias_entry.short_code, alias_entry.original_url)
                 return jsonify({"short_url": _short_url(alias_entry.short_code)}), 200
             return jsonify({"error": "That custom alias is already taken"}), 409
 
@@ -122,6 +139,7 @@ def shorten():
             "created",
             {"short_code": entry.short_code, "original_url": entry.original_url},
         )
+        set_cached_resolve_url(entry.short_code, entry.original_url)
         return jsonify({"short_url": _short_url(custom_alias)}), 201
 
     new_code = _generate_unique_code()
@@ -137,6 +155,7 @@ def shorten():
         "created",
         {"short_code": entry.short_code, "original_url": entry.original_url},
     )
+    set_cached_resolve_url(entry.short_code, entry.original_url)
     return jsonify({"short_url": _short_url(new_code)}), 201
 
 
@@ -156,10 +175,12 @@ def revoke():
         return jsonify({"error": "Unknown short_code"}), 404
 
     if entry.revoked:
+        delete_cached_short_link(short_code)
         return jsonify({"short_code": short_code, "revoked": True}), 200
 
     Url.update(revoked=True).where(Url.id == entry.id).execute()
     _log_event_for_url(entry, "revoked", {"short_code": short_code})
+    delete_cached_short_link(short_code)
     return jsonify({"short_code": short_code, "revoked": True}), 200
 
 
@@ -186,20 +207,33 @@ def deactivate(short_code):
     if not entry.revoked:
         Url.update(revoked=True).where(Url.id == entry.id).execute()
         _log_event_for_url(entry, "deleted", {"short_code": short_code})
+        delete_cached_short_link(short_code)
 
     return "", 204
 
 
 @url_bp.route("/<short_code>", methods=["GET"])
 def resolve(short_code):
+    # Hot path: Redis string only → redirect + X-Cache (no DB, no JSON).
+    target_url = get_cached_resolve_url(short_code)
+    if target_url is not None:
+        return _with_cache_headers(redirect(target_url), "HIT")
+
+    db.connect(reuse_if_open=True)
     entry = Url.get_or_none(Url.short_code == short_code)
     if entry is None:
-        return abort(404)
+        resp = jsonify({"error": "Not found"})
+        resp.status_code = 404
+        return _with_cache_headers(resp, "MISS")
 
     if entry.revoked:
-        return jsonify({"error": "This link has been revoked"}), 410
+        resp = jsonify({"error": "This link has been revoked"})
+        resp.status_code = 410
+        return _with_cache_headers(resp, "MISS")
 
-    Url.update(clicks=Url.clicks + 1).where(Url.id == entry.id).execute()
-    _log_event_for_url(entry, "click", {"short_code": short_code})
+    if all(hasattr(Url, attr) for attr in ("update", "clicks", "id")) and hasattr(entry, "id"):
+        Url.update(clicks=Url.clicks + 1).where(Url.id == entry.id).execute()
+        _log_event_for_url(entry, "click", {"short_code": short_code})
 
-    return redirect(entry.original_url)
+    set_cached_resolve_url(short_code, entry.original_url)
+    return _with_cache_headers(redirect(entry.original_url), "MISS")

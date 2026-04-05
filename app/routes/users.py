@@ -2,7 +2,7 @@ import csv
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
-from peewee import IntegrityError, chunked
+from peewee import IntegrityError, OperationalError, SqliteDatabase, chunked
 from werkzeug.exceptions import BadRequest
 
 from app.models import User
@@ -77,15 +77,24 @@ def _parse_user_payload(payload):
 
 
 def _reset_user_id_sequence():
-    User._meta.database.execute_sql(
-        """
-        SELECT setval(
-            pg_get_serial_sequence('"user"', 'id'),
-            COALESCE((SELECT MAX(id) FROM "user"), 1),
-            true
-        );
-        """
-    )
+    database = User._meta.database
+    if isinstance(database, SqliteDatabase):
+        return
+
+    try:
+        database.execute_sql(
+            """
+            SELECT setval(
+                pg_get_serial_sequence('"user"', 'id'),
+                COALESCE((SELECT MAX(id) FROM "user"), 1),
+                true
+            );
+            """
+        )
+    except OperationalError as exc:
+        # SQLite and some test DBs do not support PostgreSQL sequence functions.
+        if "pg_get_serial_sequence" not in str(exc):
+            raise
 
 @users_bp.route("/users/bulk", methods=["POST"])
 def bulk_load_users():

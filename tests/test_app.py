@@ -3,6 +3,7 @@ from pathlib import Path
 
 import app as app_module
 from peewee import SqliteDatabase
+from app.database import register_db_hooks
 from app.models import ALL_MODELS, Url, User, db
 from app.routes import url_shortener
 
@@ -12,6 +13,8 @@ class DummyUrlEntry:
         self.original_url = original_url
         self.short_code = short_code
         self.revoked = False
+        self.id = 1
+        self.created_at = None
 
 
 class DummyExpression:
@@ -32,9 +35,17 @@ class DummyField:
 
 
 def make_client(monkeypatch):
-    # Keep app factory isolated from a real Postgres instance.
+    """SQLite in memory + same DB hooks as production (resolve skips eager connect)."""
+
+    def _init_sqlite_memory(app):
+        sqlite_db = SqliteDatabase(":memory:")
+        db.initialize(sqlite_db)
+        with app.app_context():
+            sqlite_db.create_tables(ALL_MODELS, safe=True)
+        register_db_hooks(app)
+
+    monkeypatch.setattr(app_module, "init_db", _init_sqlite_memory)
     monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
-    monkeypatch.setattr(app_module, "init_db", lambda _app: None)
     test_app = app_module.create_app()
     test_app.config["TESTING"] = True
     return test_app.test_client()
@@ -49,14 +60,7 @@ def make_client_with_sqlite(monkeypatch, db_path):
         with app.app_context():
             sqlite_db.create_tables(ALL_MODELS, safe=True)
 
-        @app.before_request
-        def _db_connect():
-            db.connect(reuse_if_open=True)
-
-        @app.teardown_appcontext
-        def _db_close(_exc):
-            if not db.is_closed():
-                db.close()
+        register_db_hooks(app)
 
     monkeypatch.setattr(app_module, "init_redis", lambda _app: None)
     monkeypatch.setattr(app_module, "init_db", _init_sqlite)
@@ -91,8 +95,15 @@ def test_shorten_returns_generated_code(monkeypatch):
             return "abc123"
 
         @staticmethod
-        def create(**_kwargs):
-            return None
+        def create(**kwargs):
+            class Row:
+                id = 1
+                original_url = kwargs.get("original_url", "")
+                short_code = kwargs.get("short_code", "abc123")
+                revoked = False
+                created_at = None
+
+            return Row()
 
     monkeypatch.setattr(url_shortener, "Url", DummyUrl)
 
@@ -115,8 +126,15 @@ def test_shorten_uses_custom_alias(monkeypatch):
             return None
 
         @staticmethod
-        def create(**_kwargs):
-            return None
+        def create(**kwargs):
+            class Row:
+                id = 1
+                original_url = kwargs.get("original_url", "")
+                short_code = kwargs.get("short_code", "my-link")
+                revoked = False
+                created_at = None
+
+            return Row()
 
     monkeypatch.setattr(url_shortener, "Url", DummyUrl)
 
@@ -146,6 +164,7 @@ def test_resolve_redirects(monkeypatch):
 
     assert response.status_code == 302
     assert response.headers["Location"] == "https://www.google.com"
+    assert response.headers.get("X-Cache") == "MISS"
 
 
 def test_shorten_persists_to_db(monkeypatch, tmp_path):
@@ -460,3 +479,18 @@ def test_urls_create_requires_json_content_type(monkeypatch, tmp_path):
 
     assert response.status_code == 415
     assert response.get_json()["error"]["content_type"] == "Content-Type must be application/json"
+
+
+def test_metrics_endpoint_exposes_prometheus_metrics(monkeypatch):
+    client = make_client(monkeypatch)
+
+    # Generate a request so app-level metrics are populated.
+    client.get("/health")
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    metrics_text = response.get_data(as_text=True)
+    assert "app_requests_total" in metrics_text
+    assert "app_errors_total" in metrics_text
+    assert "app_request_latency_seconds" in metrics_text

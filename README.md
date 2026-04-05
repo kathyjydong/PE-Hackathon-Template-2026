@@ -220,3 +220,96 @@ curl -i http://localhost:5000/some-missing-short-code
 ## Failure Modes
 
 For the full graceful-failure behavior, chaos testing steps, and live demo checklist, see [Failure Modes](docs/failure-modes.md).
+
+## Kafka Log Streaming (Tier 1 Bronze)
+
+The app now emits structured JSON logs to stdout. You can pipe those logs directly to Kafka so logs are centralized and visible without SSH.
+
+Example JSON log event:
+
+```json
+{
+    "timestamp": "2026-04-04T20:05:00+00:00",
+    "level": "INFO",
+    "component": "api",
+    "message": "Request completed",
+    "node_id": "server-01",
+    "method": "GET",
+    "path": "/health",
+    "status_code": 200,
+    "latency_ms": 2.14
+}
+```
+
+### 1. Create/verify the Kafka topic
+
+```bash
+BOOTSTRAP_SERVER=localhost:9092 ./scripts/create-kafka-topic.sh app-logs
+```
+
+### 2. Stream app logs to Kafka
+
+```bash
+TOPIC_NAME=app-logs BOOTSTRAP_SERVER=localhost:9092 ./scripts/stream-logs-to-kafka.sh
+```
+
+### 3. Consume logs from another terminal/machine
+
+```bash
+TOPIC_NAME=app-logs BOOTSTRAP_SERVER=<server-ip>:9092 FROM_BEGINNING=true ./scripts/consume-kafka-logs.sh
+```
+
+### Optional environment knobs
+
+- `NODE_ID`: identifier included in every JSON log event.
+- `LOG_LEVEL`: logger threshold (default `INFO`).
+- `APP_CMD`: command used by stream script (default `uv run run.py`).
+
+## Local Watchtower Metrics (Tier 2 + Tier 3)
+
+This template now exposes Prometheus metrics at `/metrics` and includes local Prometheus + Grafana services for alerting and dashboards.
+
+### What gets exported
+
+- `app_requests_total`: request traffic count (labels: method, path, status_code)
+- `app_request_latency_seconds`: request latency histogram (labels: method, path)
+- `app_errors_total`: count of server errors (`5xx`) and unhandled exceptions
+- Default Python process metrics from `prometheus_client` (CPU and memory)
+
+### Start the watchtower stack
+
+```bash
+docker compose up --build -d db app prometheus grafana
+```
+
+### URLs
+
+- App health: `http://localhost:5000/health`
+- Raw metrics: `http://localhost:5000/metrics`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (default login: `admin` / `admin`)
+
+### Alert trap: High Error Rate
+
+Prometheus rule file: `monitoring/prometheus/alert-rules.yml`
+
+Current rule:
+
+```promql
+increase(app_errors_total[1m]) > 5
+```
+
+This is evaluated every 10s. You can view alert state in Prometheus under Alerts.
+
+### Golden Signals dashboard
+
+Grafana auto-loads `Watchtower - Golden Signals` from:
+
+- `monitoring/grafana/dashboards/watchtower-golden-signals.json`
+
+Panels included:
+
+- Traffic: `sum(rate(app_requests_total[1m]))`
+- Errors: `sum(rate(app_errors_total[1m]))`
+- Latency: p95 from `app_request_latency_seconds_bucket`
+- Saturation: process CPU + resident memory
