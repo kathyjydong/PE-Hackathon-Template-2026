@@ -54,6 +54,6 @@ jobs:
             StrictHostKeyChecking no
           EOF
 
-      - name: Deploy site
+      - name: Deploy sites
         run: |
-          ssh my-vps "cd ${{ secrets.DO_DEPLOY_PATH }} && ./redeploy-site.sh"
+          ssh my-vps "cd ${{ secrets.DO_DEPLOY_PATH }} && ./deploy.sh"
