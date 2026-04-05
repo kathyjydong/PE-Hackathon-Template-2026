@@ -100,6 +100,46 @@ while true; do docker compose ps; sleep 1; clear; done
 5. Show container auto-restarts with `docker compose ps`.
 6. Hit health again to show service recovered: `curl -i http://localhost/health`
 
+## Structured Logging Screenshot
+
+Goal: show JSON logs with timestamp, log level, and request metadata.
+
+### Start the app
+
+```bash
+docker compose up -d --build db redis app
+```
+
+### Stream app logs in one terminal
+
+```bash
+docker compose logs -f app
+```
+
+### Generate log lines from another terminal
+
+```bash
+PORT=$(docker compose port app 5000 | awk -F: '{print $2}')
+curl -i "http://localhost:${PORT}/health"
+curl -i "http://localhost:${PORT}/does-not-exist"
+```
+
+Optional error log:
+
+```bash
+docker compose stop db
+curl -i -X POST "http://localhost:${PORT}/shorten" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com"}'
+docker compose start db
+```
+
+### What to screenshot
+
+- A JSON log line with `"level":"INFO"` from `/health`
+- A JSON log line with `"level":"WARN"` from the 404 request
+- A JSON log line with `"level":"ERROR"` if you trigger the optional DB outage step
+
 ## Notes
 
 - CI/CD deployment is blocked on failing tests in `.github/workflows/cd.yml`.

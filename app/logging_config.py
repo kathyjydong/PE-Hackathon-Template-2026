@@ -8,9 +8,13 @@ from datetime import datetime, timezone
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):
+        level_name = record.levelname
+        if level_name == "WARNING":
+            level_name = "WARN"
+
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
+            "level": level_name,
             "component": getattr(record, "component", record.name),
             "message": record.getMessage(),
             "node_id": os.environ.get("NODE_ID", socket.gethostname()),
