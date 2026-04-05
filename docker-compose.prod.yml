@@ -34,8 +34,6 @@ services:
       - REDIS_RESOLVE_DEBUG=${REDIS_RESOLVE_DEBUG:-}
 
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_started
     volumes:
