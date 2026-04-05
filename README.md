@@ -221,6 +221,10 @@ curl -i http://localhost:5000/some-missing-short-code
 
 For the full graceful-failure behavior, chaos testing steps, and live demo checklist, see [Failure Modes](docs/failure-modes.md).
 
+## Deployment
+
+For production rollout and rollback procedures, see [Deploy Guide](docs/deploy-guide.md).
+
 ## Kafka Log Streaming (Tier 1 Bronze)
 
 The app now emits structured JSON logs to stdout. You can pipe those logs directly to Kafka so logs are centralized and visible without SSH.

@@ -55,7 +55,7 @@ Expected:
 
 ## Chaos Mode (Container Kill + Auto Restart)
 
-The project uses Docker Compose with restart policies (`restart: always`) in `docker-compose.yml` for `db`, `app`, and `nginx`.
+The project uses Docker Compose with restart policies (`restart: always`) in `docker-compose.yml` for `db`, `app`, and `redis`.
 
 ### Start the stack
 
@@ -63,10 +63,10 @@ The project uses Docker Compose with restart policies (`restart: always`) in `do
 docker compose up -d --build
 ```
 
-### Kill the app container
+### Crash the app process (PID 1) inside the container
 
 ```bash
-docker compose kill app
+docker compose exec -T app sh -lc 'kill -9 1'
 ```
 
 ### Observe automatic recovery
@@ -80,6 +80,11 @@ Expected:
 - The `app` service returns to `Up` automatically.
 - Traffic continues once app restarts.
 
+Note:
+
+- `docker compose kill app` is treated as a manual container stop and may not trigger restart policy behavior for chaos testing.
+- Crashing PID 1 inside the container better simulates a real process failure.
+
 Optional live watch:
 
 ```bash
@@ -91,7 +96,7 @@ while true; do docker compose ps; sleep 1; clear; done
 1. Start stack: `docker compose up -d --build`
 2. Verify health: `curl -i http://localhost/health`
 3. Send garbage data to `/shorten` and show clean JSON 400.
-4. Kill app container: `docker compose kill app`
+4. Crash app process: `docker compose exec -T app sh -lc 'kill -9 1'`
 5. Show container auto-restarts with `docker compose ps`.
 6. Hit health again to show service recovered: `curl -i http://localhost/health`
 

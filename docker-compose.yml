@@ -61,8 +61,8 @@ services:
       - socket_data:/tmp
     ports:
       - "5000-5009:5000" 
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - BASE_URL=${BASE_URL}
     restart: always
+
+volumes:
+  postgres_data:
+  socket_data:
