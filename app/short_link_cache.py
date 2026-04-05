@@ -44,10 +44,8 @@ def get_cached_short_link(alias: str) -> dict[str, Any] | None:
     try:
         raw = client.get(_redis_key(alias))
         if raw is None:
-            logger.info("short link cache miss alias=%s", alias)
             return None
         data = json.loads(raw)
-        logger.info("short link cache hit alias=%s", alias)
         return data if isinstance(data, dict) else None
     except (redis.RedisError, json.JSONDecodeError, TypeError, ValueError) as err:
         logger.warning("Redis get failed alias=%s: %s", alias, err)

@@ -1,27 +1,61 @@
 import http from "k6/http";
-import { check } from "k6";
+import { check, sleep } from "k6";
+import { Counter } from "k6/metrics";
+import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.2/index.js";
+
+/** Count X-Cache on successful redirects (verify Redis after warmup — expect mostly HIT for k6hot) */
+const resolveCacheHit = new Counter("resolve_x_cache_HIT");
+const resolveCacheMiss = new Counter("resolve_x_cache_MISS");
 
 /**
- * Do NOT set BASE_URL=http://127.0.0.1:5000 — that bypasses nginx; setup will fail on purpose.
+ * Do NOT set BASE_URL to :5000/:5001 unless K6_DIRECT_APP=1 — that bypasses nginx.
  *
- * Correct (through load balancer + Redis checks):
- *   docker compose up --build
+ * Host k6 (same machine as Docker Desktop):
  *   k6 run k6/load.js
  *
- * Direct gunicorn only (no LB / no X-LB check — use mapped host port, often 5001 on Mac):
- *   K6_DIRECT_APP=1 BASE_URL=http://127.0.0.1:5001 k6 run k6/load.js
+ * k6 inside Docker (grafana/k6): 127.0.0.1 is the k6 container, not your Mac.
+ *   Repo root mounted at /work → script is /work/k6/load.js (not /work/load.js):
+ *   docker run --rm -e K6_IN_DOCKER=1 -v "$PWD:/work" grafana/k6 run /work/k6/load.js
+ *   Or mount only the k6 folder:
+ *   docker run --rm -e K6_IN_DOCKER=1 -v "$PWD/k6:/scripts" grafana/k6 run /scripts/load.js
+ * Linux may need: --add-host=host.docker.internal:host-gateway
+ * Or use host networking: docker run --network host ... (then BASE_URL=http://127.0.0.1:8080)
  *
- * Optional: TARGET_VUS=500 (default). Lighter: TARGET_VUS=200 k6 run k6/load.js
+ * Direct Flask (debug): start `uv run run.py` first; BASE_URL port must match PORT (default 5000).
+ *
+ * TARGET_VUS: default 500 (hackathon / tsunami). Override: TARGET_VUS=200 k6 run k6/load.js
+ * K6_DIRECT_APP + run.py cannot sustain 500 VUs — use Docker + :8080 for full load, or TARGET_VUS=25.
  */
-const BASE_URL = (__ENV.BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
-const TARGET_VUS = parseInt(__ENV.TARGET_VUS || "500", 10);
-const SEED_ALIAS = "k6hot";
+function defaultBaseUrl() {
+  if (__ENV.K6_IN_DOCKER === "1") {
+    return "http://host.docker.internal:8080";
+  }
+  return "http://127.0.0.1:8080";
+}
+
+const BASE_URL = (__ENV.BASE_URL || defaultBaseUrl()).replace(/\/$/, "");
 const DIRECT_APP = __ENV.K6_DIRECT_APP === "1";
+const TARGET_VUS = parseInt(__ENV.TARGET_VUS || "500", 10);
+/** Extra pacing only for direct run.py at low VU counts (optional). */
+const DIRECT_PACE = DIRECT_APP && TARGET_VUS <= 50;
+const SEED_ALIAS = "k6hot";
 const HIT_LB = BASE_URL.includes(":8080");
 
 const reqParams = {
   timeout: "45s",
+  // Force keep-alive; helps reuse TCP to the same host under load
+  headers: { Connection: "keep-alive" },
 };
+
+function postJson(url, body) {
+  return http.post(url, body, {
+    timeout: reqParams.timeout,
+    headers: {
+      ...reqParams.headers,
+      "Content-Type": "application/json",
+    },
+  });
+}
 
 function headerGet(res, name) {
   if (!res || res.headers === undefined || res.headers === null) return "";
@@ -68,32 +102,73 @@ function isRedirectStatus(code) {
   return code === 301 || code === 302 || code === 303 || code === 307 || code === 308;
 }
 
+/** K6_DIRECT_APP + many VUs → macOS often hits ephemeral port exhaustion (can't assign requested address). */
+const RELAX_THRESHOLDS = DIRECT_APP && TARGET_VUS >= 100;
+
 export const options = {
+  discardResponseBodies: true,
   stages: [
     { duration: "15s", target: TARGET_VUS },
     { duration: "40s", target: TARGET_VUS },
     { duration: "10s", target: 0 },
   ],
-  thresholds: {
-    http_req_failed: ["rate<0.05"],
-    http_req_duration: ["p(95)<5000"],
-  },
+  thresholds: RELAX_THRESHOLDS
+    ? {
+        // Direct loopback @ high VUs: macOS ephemeral ports ("can't assign requested address")
+        http_req_failed: ["rate<0.45"],
+        http_req_duration: ["p(95)<5000"],
+        checks: ["rate>0.55"],
+      }
+    : {
+        http_req_failed: ["rate<0.01"],
+        http_req_duration: ["p(95)<5000"],
+        checks: ["rate==1"],
+      },
 };
 
 export function setup() {
+  if (RELAX_THRESHOLDS) {
+    console.warn(
+      "K6_DIRECT_APP with TARGET_VUS>=100: k6 on Mac often gets 'can't assign requested address' " +
+        "(ephemeral ports). Redis can still be 100% HIT. For strict thresholds + 500 VUs use: " +
+        "docker compose up --build && k6 run k6/load.js"
+    );
+  }
   if (!DIRECT_APP && !BASE_URL.includes(":8080")) {
     throw new Error(
-      "k6: BASE_URL must use nginx on :8080 (load balancer), not :5000/:5001.\n" +
-        "  Fix: unset BASE_URL and run:  k6 run k6/load.js\n" +
-        "   Or: BASE_URL=http://127.0.0.1:8080 k6 run k6/load.js\n" +
-        "  Skip LB (debug only):  K6_DIRECT_APP=1 BASE_URL=http://127.0.0.1:5001 k6 run k6/load.js"
+      "k6: BASE_URL must hit nginx on port :8080 (not :5000/:5001).\n" +
+        "  On host:  k6 run k6/load.js  or  BASE_URL=http://127.0.0.1:8080 k6 run k6/load.js\n" +
+        "  In grafana/k6 container:  -e K6_IN_DOCKER=1  or  -e BASE_URL=http://host.docker.internal:8080\n" +
+        "  Linux Docker: add  --add-host=host.docker.internal:host-gateway\n" +
+        "  Skip LB (debug): start app first, then match the port:\n" +
+        "    uv run run.py   →  K6_DIRECT_APP=1 BASE_URL=http://127.0.0.1:5000 k6 run k6/load.js\n" +
+        "    PORT=5001 uv run run.py  →  ... BASE_URL=http://127.0.0.1:5001 ..."
     );
   }
 
   const health = http.get(`${BASE_URL}/health`, reqParams);
   if (health.status !== 200) {
+    if (health.status === 0) {
+      if (DIRECT_APP) {
+        throw new Error(
+          `k6 setup: connection refused for ${BASE_URL}/health — nothing is listening on that host/port.\n` +
+            `  Start Flask first:  uv run run.py  (default port 5000) or  PORT=5001 uv run run.py\n` +
+            `  BASE_URL must match: same port in K6_DIRECT_APP=1 BASE_URL=http://127.0.0.1:<port>\n` +
+            `  Or use Docker + nginx:  docker compose up --build  then  k6 run k6/load.js  (no K6_DIRECT_APP)`
+        );
+      }
+      throw new Error(
+        `k6 setup: connection refused / failed for ${BASE_URL}/health — nothing is listening (status 0).\n` +
+          `  Default URL is nginx on port 8080. Start the stack from the repo root first:\n` +
+          `    docker compose up --build\n` +
+          `  Wait until it is up, then verify in another terminal:\n` +
+          `    curl -sSf http://127.0.0.1:8080/health\n` +
+          `  If k6 runs inside Docker, use: K6_IN_DOCKER=1 or BASE_URL=http://host.docker.internal:8080\n` +
+          `  To hit Flask on the host instead: K6_DIRECT_APP=1 BASE_URL=http://127.0.0.1:5000 (run uv run run.py first)`
+      );
+    }
     throw new Error(
-      `k6 setup: GET ${BASE_URL}/health → ${health.status}. Run: docker compose up --build`
+      `k6 setup: GET ${BASE_URL}/health → HTTP ${health.status}. Run: docker compose up --build`
     );
   }
   if (HIT_LB) {
@@ -110,10 +185,7 @@ export function setup() {
     url: "https://loadtest.seed.example/k6-warm-alias",
     custom_alias: SEED_ALIAS,
   });
-  const seed = http.post(`${BASE_URL}/shorten`, seedPayload, {
-    headers: { "Content-Type": "application/json" },
-    ...reqParams,
-  });
+  const seed = postJson(`${BASE_URL}/shorten`, seedPayload);
   if (seed.status !== 201 && seed.status !== 200) {
     throw new Error(
       `k6 setup: seed shorten → ${seed.status} body=${String(seed.body).slice(0, 200)}`
@@ -132,11 +204,40 @@ export function setup() {
   if (label !== "HIT") {
     throw new Error(
       `k6 setup: 2nd GET /${SEED_ALIAS} should be Redis cache HIT (got X-Cache/X-Cache-Status=${label || "empty"}). ` +
-        `Check app REDIS_URL and redis container.`
+        `For run.py: start Redis (e.g. docker compose up -d redis) and set REDIS_URL=redis://127.0.0.1:6379/0 in .env`
     );
   }
 
   return { alias: SEED_ALIAS };
+}
+
+export function handleSummary(data) {
+  // Defining handleSummary disables k6's default stdout summary; textSummary restores it (checks %, p95, etc.).
+  const standard = textSummary(data, { indent: " ", enableColors: true });
+
+  const h = data.metrics.resolve_x_cache_HIT?.values?.count ?? 0;
+  const m = data.metrics.resolve_x_cache_MISS?.values?.count ?? 0;
+  const n = h + m;
+  const pctHit = n > 0 ? ((100.0 * h) / n).toFixed(1) : "n/a";
+  const failRate = data.metrics.http_req_failed?.values?.rate;
+  const cacheNote =
+    n === 0
+      ? "  (no redirect samples — setup may have failed before any load; ignore this block)\n"
+      : "";
+
+  let tail =
+    `\n--- Redis / X-Cache on resolves (alias warmed in setup) ---\n` +
+    `  X-Cache HIT: ${h}   X-Cache MISS: ${m}   (${pctHit}% HIT of ${n} sampled redirects)\n` +
+    `  Expect mostly HIT for /${SEED_ALIAS} once Redis is hot.\n` +
+    cacheNote;
+
+  if (DIRECT_APP && failRate !== undefined && failRate > 0.05) {
+    tail +=
+      "\nIf you see many 'can't assign requested address' warnings: that is k6→127.0.0.1 client limits on macOS.\n" +
+      "Run the tsunami against nginx instead (no K6_DIRECT_APP):  k6 run k6/load.js\n";
+  }
+
+  return { stdout: standard + tail };
 }
 
 export default function (data) {
@@ -148,6 +249,7 @@ export default function (data) {
   if (roll < 0.03) {
     const health = http.get(`${BASE_URL}/health`, p);
     check(health, { "health 200": (r) => r.status === 200 });
+    if (DIRECT_PACE) sleep(0.15);
     return;
   }
 
@@ -157,30 +259,29 @@ export default function (data) {
     const loc = headerGet(resolve, "Location");
     const lb = headerGet(resolve, "X-LB");
 
+    // Single check per resolve so pass/fail matches one HTTP round-trip
     check(resolve, {
-      "resolve redirect (3xx)": () => redir,
+      [`resolve ok (redirect, Location, X-Cache${HIT_LB ? ", X-LB" : ""})`]: () =>
+        redir &&
+        loc.length > 0 &&
+        isCacheHitOrMiss(resolve) &&
+        (!HIT_LB || lb.toLowerCase().includes("nginx")),
     });
-    if (redir) {
-      const detail = {
-        "resolve has Location": () => loc.length > 0,
-        "redis cache header (HIT/MISS)": () => isCacheHitOrMiss(resolve),
-      };
-      if (HIT_LB) {
-        detail["via nginx LB (X-LB)"] = () => lb.toLowerCase().includes("nginx");
-      }
-      check(resolve, detail);
+    if (redir && loc.length > 0) {
+      const lab = cacheLabel(resolve);
+      if (lab === "HIT") resolveCacheHit.add(1);
+      else if (lab === "MISS") resolveCacheMiss.add(1);
     }
+    if (DIRECT_PACE) sleep(0.15);
     return;
   }
 
   const payload = JSON.stringify({
     url: `https://loadtest.example.com/vu-${__VU}-iter-${__ITER}-${Date.now()}`,
   });
-  const shorten = http.post(`${BASE_URL}/shorten`, payload, {
-    headers: { "Content-Type": "application/json" },
-    ...p,
-  });
+  const shorten = postJson(`${BASE_URL}/shorten`, payload);
   check(shorten, {
     "shorten 201 or 200": (r) => r.status === 201 || r.status === 200,
   });
+  if (DIRECT_PACE) sleep(0.15);
 }
