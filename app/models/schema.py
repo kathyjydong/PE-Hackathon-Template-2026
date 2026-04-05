@@ -8,6 +8,7 @@ from peewee import (
     ForeignKeyField,
     Model,
     TextField,
+    IntegerField,
 )
 
 
@@ -37,6 +38,7 @@ class Url(BaseModel):
     event = ForeignKeyField(Event, backref='urls', null=True, on_delete='CASCADE')
     created_by = ForeignKeyField(User, backref='created_urls', null=True, on_delete='CASCADE')
     created_at = DateTimeField(default=datetime.datetime.now)
+    clicks = IntegerField(default=0)
 
     @classmethod
     def generate_code(cls):
