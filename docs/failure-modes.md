@@ -86,7 +86,7 @@ Optional live watch:
 while true; do docker compose ps; sleep 1; clear; done
 ```
 
-## Live Demo Checklist
+## Checklist
 
 1. Start stack: `docker compose up -d --build`
 2. Verify health: `curl -i http://localhost/health`
