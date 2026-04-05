@@ -74,7 +74,7 @@ def shorten():
 
     # Cache miss: query read replica for existing non-revoked entry
     db_read.connect(reuse_if_open=True)
-    with db_read.bind_ctx([Url]):
+    with db_read.bind_ctx([_UrlSchema]):
         existing = Url.get_or_none(
             (Url.original_url == long_url) & (Url.revoked == False)  # noqa: E712
         )
@@ -126,7 +126,7 @@ def resolve(short_code):
 
     # Cache miss: use read replica (single-writer, multi-reader pattern)
     db_read.connect(reuse_if_open=True)
-    with db_read.bind_ctx([Url]):
+    with db_read.bind_ctx([_UrlSchema]):
         entry = Url.get_or_none(Url.short_code == short_code)
 
     if entry is None:
