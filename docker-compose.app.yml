@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    # Using gevent workers for high concurrency
+    command: uv run gunicorn --worker-class gevent --workers 4 --bind 0.0.0.0:5000 run:app
+    env_file:
+      - .env
+    ports:
+      - "5000-5002:5000" 
+    restart: always
