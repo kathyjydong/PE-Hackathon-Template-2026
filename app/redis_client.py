@@ -43,11 +43,13 @@ def init_redis(app: Flask) -> None:
         r = redis.from_url(url, decode_responses=True)
         r.ping()
     except (redis.RedisError, ValueError) as err:
-        app.logger.error("Redis connection failed: %s", err)
-        raise RuntimeError(
-            "Failed to connect to Redis. Use a full URL like redis://127.0.0.1:6379/0 "
-            f"(got REDIS_URL after normalize: {url!r}). Error: {err}"
-        ) from err
+        app.logger.error(
+            "Redis unavailable at startup (%s). App will run without cache. Error: %s",
+            url,
+            err,
+        )
+        _client = None
+        return
 
     _client = r
     app.logger.info("Connected to Redis")

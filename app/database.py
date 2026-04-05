@@ -1,13 +1,37 @@
 import os
 import logging
+
+from flask import request
 from peewee import PostgresqlDatabase
-from app.models import db, ALL_MODELS 
+
+from app.models import ALL_MODELS, db
+
+
+def register_db_hooks(app):
+    """
+    Open Postgres only for routes that need it. Skips /health, /, and url.resolve
+    (resolve opens DB only on cache miss — Redis hits never touch Postgres).
+    """
+
+    @app.before_request
+    def _db_connect():
+        ep = request.endpoint
+        if ep in ("health", "home"):
+            return
+        if ep == "url.resolve":
+            return
+        db.connect(reuse_if_open=True)
+
+    @app.teardown_appcontext
+    def _db_close(exc):
+        if not db.is_closed():
+            db.close()
+
 
 
 logger = logging.getLogger(__name__)
 
 def init_db(app):
-    # This reads your .env file to talk to the Docker container
     database = PostgresqlDatabase(
         os.environ.get("DATABASE_NAME", "hackathon_db"),
         host=os.environ.get("DATABASE_HOST", "localhost"),
@@ -15,15 +39,12 @@ def init_db(app):
         user=os.environ.get("DATABASE_USER", "postgres"),
         password=os.environ.get("DATABASE_PASSWORD", "postgres"),
     )
-    
-    # Plug the real database into the Proxy
+
     db.initialize(database)
 
     with app.app_context():
-        # SAFETY UPDATE: Wrapped in try/except to prevent clones from crashing each other
         try:
             database.create_tables(ALL_MODELS, safe=True)
-            # Peewee create_tables(safe=True) does not add new columns to existing tables.
             database.execute_sql(
                 "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
             )
@@ -35,12 +56,6 @@ def init_db(app):
                 extra={"component": "database"},
                 exc_info=True,
             )
+            print(f"Database already initialized by another instance, skipping: {e}")
 
-    @app.before_request
-    def _db_connect():
-        db.connect(reuse_if_open=True)
-
-    @app.teardown_appcontext
-    def _db_close(exc):
-        if not db.is_closed():
-            db.close()
+    register_db_hooks(app)
