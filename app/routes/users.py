@@ -162,7 +162,7 @@ def create_user():
         return jsonify(error=exc.args[0]), 400
 
     # Idempotent create: if same user already exists, return it as created.
-    exact = User.get_or_none((User.email == email) or (User.username == username))
+    exact = User.get_or_none((User.email == email) | (User.username == username))
     if exact is not None:
         return jsonify(_serialize_user(exact)), 201
 
