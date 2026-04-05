@@ -99,3 +99,4 @@ while true; do docker compose ps; sleep 1; clear; done
 
 - CI/CD deployment is blocked on failing tests in `.github/workflows/cd.yml`.
 - Error handlers are configured to return JSON for HTTP errors and unexpected exceptions.
+- Emergency response runbook: [In Case of Emergency](in-case-of-emergency.md)
