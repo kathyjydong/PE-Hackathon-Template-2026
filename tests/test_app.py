@@ -191,3 +191,18 @@ def test_method_not_allowed_returns_json_error(monkeypatch):
     assert response.status_code == 405
     assert response.is_json
     assert "not allowed" in response.get_json()["error"].lower()
+
+
+def test_metrics_endpoint_exposes_prometheus_metrics(monkeypatch):
+    client = make_client(monkeypatch)
+
+    # Generate a request so app-level metrics are populated.
+    client.get("/health")
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    metrics_text = response.get_data(as_text=True)
+    assert "app_requests_total" in metrics_text
+    assert "app_errors_total" in metrics_text
+    assert "app_request_latency_seconds" in metrics_text

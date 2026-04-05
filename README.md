@@ -264,3 +264,52 @@ TOPIC_NAME=app-logs BOOTSTRAP_SERVER=<server-ip>:9092 FROM_BEGINNING=true ./scri
 - `NODE_ID`: identifier included in every JSON log event.
 - `LOG_LEVEL`: logger threshold (default `INFO`).
 - `APP_CMD`: command used by stream script (default `uv run run.py`).
+
+## Local Watchtower Metrics (Tier 2 + Tier 3)
+
+This template now exposes Prometheus metrics at `/metrics` and includes local Prometheus + Grafana services for alerting and dashboards.
+
+### What gets exported
+
+- `app_requests_total`: request traffic count (labels: method, path, status_code)
+- `app_request_latency_seconds`: request latency histogram (labels: method, path)
+- `app_errors_total`: count of server errors (`5xx`) and unhandled exceptions
+- Default Python process metrics from `prometheus_client` (CPU and memory)
+
+### Start the watchtower stack
+
+```bash
+docker compose up --build -d db app prometheus grafana
+```
+
+### URLs
+
+- App health: `http://localhost:5000/health`
+- Raw metrics: `http://localhost:5000/metrics`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (default login: `admin` / `admin`)
+
+### Alert trap: High Error Rate
+
+Prometheus rule file: `monitoring/prometheus/alert-rules.yml`
+
+Current rule:
+
+```promql
+increase(app_errors_total[1m]) > 5
+```
+
+This is evaluated every 10s. You can view alert state in Prometheus under Alerts.
+
+### Golden Signals dashboard
+
+Grafana auto-loads `Watchtower - Golden Signals` from:
+
+- `monitoring/grafana/dashboards/watchtower-golden-signals.json`
+
+Panels included:
+
+- Traffic: `sum(rate(app_requests_total[1m]))`
+- Errors: `sum(rate(app_errors_total[1m]))`
+- Latency: p95 from `app_request_latency_seconds_bucket`
+- Saturation: process CPU + resident memory

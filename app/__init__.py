@@ -1,9 +1,12 @@
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
 from time import perf_counter
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
+from prometheus_client import make_wsgi_app
 from werkzeug.exceptions import HTTPException
 from app.database import init_db
 from app.logging_config import configure_structured_logging
+from app.metrics import record_request_metrics, record_exception
 from app.redis_client import init_redis
 from app.routes import register_routes
 
@@ -13,6 +16,7 @@ def create_app():
     configure_structured_logging()
 
     app = Flask(__name__)
+    app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {"/metrics": make_wsgi_app()})
 
     @app.before_request
     def _start_timer():
@@ -28,6 +32,8 @@ def create_app():
         latency_ms = None
         if started is not None:
             latency_ms = round((perf_counter() - started) * 1000, 2)
+
+        record_request_metrics(request=request, response=response, latency_ms=latency_ms)
 
         app.logger.info(
             "Request completed",
@@ -77,6 +83,7 @@ def create_app():
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
         app.logger.exception("Unhandled exception", extra={"component": "api"})
+        record_exception()
         return jsonify(error="Internal server error"), 500
 
     return app
