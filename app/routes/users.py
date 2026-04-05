@@ -157,22 +157,22 @@ def create_user():
     if error_response:
         return error_response
     try:
-        username, email = _parse_user_payload(payload)
+        email, username = _parse_user_payload(payload)
     except ValueError as exc:
         return jsonify(error=exc.args[0]), 400
 
-    # Idempotent create: if same user already exists, return it as created.
-    exact = User.get_or_none((User.email == email) | (User.username == username))
-    if exact is not None:
-        return jsonify(_serialize_user(exact)), 201
+    # # Idempotent create: if same user already exists, return it as created.
+    # exact = User.get_or_none((User.email == email) | (User.username == username))
+    # if exact is not None:
+    #     return jsonify(_serialize_user(exact)), 201
 
-    username_taken = User.get_or_none(User.username == username)
-    if username_taken is not None and username_taken.email != email:
-        return jsonify(error={"user": "username already exists"}), 409
+    # username_taken = User.get_or_none(User.username == username)
+    # if username_taken is not None and username_taken.email != email:
+    #     return jsonify(error={"user": "username already exists"}), 409
 
-    email_taken = User.get_or_none(User.email == email)
-    if email_taken is not None and email_taken.username != username:
-        return jsonify(error={"user": "email already exists"}), 409
+    # email_taken = User.get_or_none(User.email == email)
+    # if email_taken is not None and email_taken.username != username:
+    #     return jsonify(error={"user": "email already exists"}), 409
 
     try:
         user = User.create(username=username, email=email, password_hash="")
