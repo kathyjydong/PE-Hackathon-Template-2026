@@ -34,7 +34,7 @@ def get_average_cpu():
 
 def scale_app(target_instances):
     """Fires the terminal command to change the number of clones."""
-    print(f"🚀 Scaling to {target_instances} instances...")
+    print(f"Scaling to {target_instances} instances...")
     subprocess.run(["docker-compose", "up", "-d", "--scale", f"app={target_instances}"])
     print(f"⏳ Sleeping for {COOLDOWN_SECONDS}s cooldown...")
     time.sleep(COOLDOWN_SECONDS)

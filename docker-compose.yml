@@ -35,7 +35,7 @@ services:
       - sh
       - -c
       - |
-        exec uv run gunicorn -w "$${GUNICORN_WORKERS:-64}" \
+        exec uv run gunicorn -w "$${GUNICORN_WORKERS:-256}" \
           --bind unix:/tmp/app.sock \
           --bind 0.0.0.0:5000 \
           run:app
