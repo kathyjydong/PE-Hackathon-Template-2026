@@ -1,8 +1,10 @@
+import os
+
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
 from time import perf_counter
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from prometheus_client import make_wsgi_app
+from prometheus_client import CollectorRegistry, make_wsgi_app, multiprocess
 from werkzeug.exceptions import HTTPException
 from app.database import init_db
 from app.logging_config import configure_structured_logging
@@ -11,12 +13,22 @@ from app.redis_client import init_redis
 from app.routes import register_routes
 
 
+def _build_metrics_wsgi_app():
+    multiproc_dir = os.getenv("PROMETHEUS_MULTIPROC_DIR", "").strip()
+    if not multiproc_dir:
+        return make_wsgi_app()
+
+    registry = CollectorRegistry()
+    multiprocess.MultiProcessCollector(registry)
+    return make_wsgi_app(registry=registry)
+
+
 def create_app():
     load_dotenv()
     configure_structured_logging()
 
     app = Flask(__name__)
-    app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {"/metrics": make_wsgi_app()})
+    app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {"/metrics": _build_metrics_wsgi_app()})
 
     @app.before_request
     def _start_timer():

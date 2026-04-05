@@ -1,9 +1,64 @@
 services:
+# This is how we define the architecture of our system
+# 3 components:
+# 1. The Database (Postgres)
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+
+# 2. The Clone Army (Your Flask App)
+# This is what gets scaled up and down based on traffic and where the actual app is
   app:
     build: .
-# command to run app with uv and gevent workers
-    command: uv run gunicorn --worker-class gevent --workers 4 --bind 0.0.0.0:5000 run:app
-# Opening the port up so Nginx on VPS 1 can reach the app hosted on VPS 2
+    # Unix socket for nginx upstream + TCP :5000 for host tools / k6 direct (optional)
+    command:
+      - sh
+      - -c
+      - |
+        rm -rf /tmp/prometheus
+        mkdir -p /tmp/prometheus
+        exec uv run gunicorn -w "$${GUNICORN_WORKERS:-64}" \
+          --config gunicorn_conf.py \
+          --bind unix:/tmp/app.sock \
+          --bind 0.0.0.0:5000 \
+          run:app
+    environment:
+      - FLASK_DEBUG=${FLASK_DEBUG:-false}
+      - DATABASE_URL=postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@db:${DATABASE_PORT}/${DATABASE_NAME}
+      - DATABASE_HOST=db
+      - DATABASE_USER=${DATABASE_USER}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD}
+      - DATABASE_NAME=${DATABASE_NAME}
+      - DATABASE_PORT=${DATABASE_PORT}
+      - REDIS_URL=redis://redis:6379/0
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-64}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
+      - BASE_URL=${BASE_URL}
+      - REDIS_RESOLVE_DEBUG=${REDIS_RESOLVE_DEBUG:-}
+
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - socket_data:/tmp
     ports:
       - "5000-5009:5000" 
     environment:
