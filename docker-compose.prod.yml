@@ -12,12 +12,8 @@ services:
     build: .
     command: >
       sh -c "
-      exec uv run gunicorn -w ${GUNICORN_WORKERS:-64}
-      --bind unix:/tmp/app.sock
-      --bind 0.0.0.0:5000
-      --access-logfile -
-      --error-logfile -
-      run:app
+      mkdir -p /tmp/prometheus &&
+      exec uv run gunicorn -c gunicorn_conf.py run:app
       "
     env_file:
       - .env
@@ -28,7 +24,14 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - FLASK_DEBUG=${FLASK_DEBUG}
       - BASE_URL=${BASE_URL}
-      - GUNICORN_WORKERS=${GUNICORN_WORKERS}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-96}
+      - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-4}
+      - GUNICORN_WORKER_CLASS=${GUNICORN_WORKER_CLASS:-gthread}
+      - GUNICORN_MAX_CONCURRENCY=${GUNICORN_MAX_CONCURRENCY:-512}
+      - GUNICORN_BACKLOG=${GUNICORN_BACKLOG:-2048}
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
     depends_on:
       - redis
     volumes:

@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, jsonify, redirect, request
 from werkzeug.exceptions import BadRequest
 
-from app.models import Event, Url, User, db
+from app.models import Event, Url, UrlRead, User, db, db_read
 from app.short_link_cache import (
     delete_cached_short_link,
     get_cached_resolve_url,
@@ -219,8 +219,9 @@ def resolve(short_code):
     if target_url is not None:
         return _with_cache_headers(redirect(target_url), "HIT")
 
-    db.connect(reuse_if_open=True)
-    entry = Url.get_or_none(Url.short_code == short_code)
+    # Cache miss: SELECT on read replica; click counter UPDATE stays on primary.
+    db_read.connect(reuse_if_open=True)
+    entry = UrlRead.get_or_none(UrlRead.short_code == short_code)
     if entry is None:
         resp = jsonify({"error": "Not found"})
         resp.status_code = 404
@@ -232,6 +233,7 @@ def resolve(short_code):
         return _with_cache_headers(resp, "MISS")
 
     if all(hasattr(Url, attr) for attr in ("update", "clicks", "id")) and hasattr(entry, "id"):
+        db.connect(reuse_if_open=True)
         Url.update(clicks=Url.clicks + 1).where(Url.id == entry.id).execute()
         _log_event_for_url(entry, "click", {"short_code": short_code})
 

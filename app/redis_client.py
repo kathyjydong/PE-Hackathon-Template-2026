@@ -70,7 +70,8 @@ def init_redis(app: Flask) -> None:
         return
 
     try:
-        r = redis.from_url(url, decode_responses=True)
+        max_conn = int(os.environ.get("REDIS_MAX_CONNECTIONS", "128"))
+        r = redis.from_url(url, decode_responses=True, max_connections=max_conn)
         r.ping()
     except (redis.RedisError, ValueError) as err:
         app.logger.error(

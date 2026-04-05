@@ -40,6 +40,8 @@ const MIXED_WORKLOAD = __ENV.K6_MIXED_WORKLOAD === "1";
 const DIRECT_PACE = DIRECT_APP && TARGET_VUS <= 50;
 const SEED_ALIAS = "k6hot";
 const HIT_LB = BASE_URL.includes(":8080");
+/** Set K6_STRICT_LATENCY=1 to assert p(95) resolve latency under 150ms (after gthread tuning). */
+const STRICT_LATENCY = __ENV.K6_STRICT_LATENCY === "1";
 
 const reqParams = {
   timeout: "45s",
@@ -120,7 +122,9 @@ export const options = {
       }
     : {
         http_req_failed: ["rate<0.01"],
-        http_req_duration: ["p(95)<5000"],
+        http_req_duration: STRICT_LATENCY
+          ? ["p(95)<150", "p(90)<120"]
+          : ["p(95)<5000"],
         checks: ["rate==1"],
       },
 };

@@ -48,5 +48,14 @@ class Url(BaseModel):
     def generate_code(cls):
         return secrets.token_urlsafe(6)
 
+
+class UrlRead(Url):
+    """Same `url` table, read replica pool (resolve cache-miss SELECTs)."""
+
+    class Meta:
+        database = db_read
+        table_name = "url"
+
+
 # This list tells the database which tables to create in Docker
 ALL_MODELS = [User, Event, Url]

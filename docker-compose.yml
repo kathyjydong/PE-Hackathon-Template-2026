@@ -33,11 +33,7 @@ services:
       - |
         rm -rf /tmp/prometheus
         mkdir -p /tmp/prometheus
-        exec uv run gunicorn -w "$${GUNICORN_WORKERS:-64}" \
-          --config gunicorn_conf.py \
-          --bind unix:/tmp/app.sock \
-          --bind 0.0.0.0:5000 \
-          run:app
+        exec uv run gunicorn -c gunicorn_conf.py run:app
     environment:
       - FLASK_DEBUG=${FLASK_DEBUG:-false}
       # Inside Compose, Postgres always listens on 5432. Do not use ${DATABASE_PORT}
@@ -49,7 +45,11 @@ services:
       - DATABASE_NAME=${DATABASE_NAME}
       - DATABASE_PORT=5432
       - REDIS_URL=redis://redis:6379/0
-      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-64}
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-96}
+      - GUNICORN_WORKER_CLASS=${GUNICORN_WORKER_CLASS:-gthread}
+      - GUNICORN_MAX_CONCURRENCY=${GUNICORN_MAX_CONCURRENCY:-512}
+      - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-4}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
       - BASE_URL=${BASE_URL}
       - REDIS_RESOLVE_DEBUG=${REDIS_RESOLVE_DEBUG:-}

@@ -1,72 +1,3 @@
-<<<<<<< Updated upstream
-import os
-import logging
-
-from flask import request
-from peewee import PostgresqlDatabase
-
-from app.models import ALL_MODELS, db, db_read
-
-
-def register_db_hooks(app):
-    """
-    Open Postgres only for routes that need it. Skips /health, /, and url.resolve
-    (resolve opens DB only on cache miss — Redis hits never touch Postgres).
-    """
-
-    @app.before_request
-    def _db_connect():
-        ep = request.endpoint
-        if ep in ("health", "home"):
-            return
-        if ep == "url.resolve":
-            return
-        db.connect(reuse_if_open=True)
-
-    @app.teardown_appcontext
-    def _db_close(exc):
-        for conn in (db, db_read):
-            try:
-                if not conn.is_closed():
-                    conn.close()
-            except Exception:
-                pass
-
-
-
-logger = logging.getLogger(__name__)
-
-def init_db(app):
-    database = PostgresqlDatabase(
-        os.environ.get("DATABASE_NAME", "hackathon_db"),
-        host=os.environ.get("DATABASE_HOST", "localhost"),
-        port=int(os.environ.get("DATABASE_PORT", 5432)),
-        user=os.environ.get("DATABASE_USER", "postgres"),
-        password=os.environ.get("DATABASE_PASSWORD", "postgres"),
-        max_connections=10,      # 🔥 IMPORTANT (leave headroom from 22)
-        stale_timeout=300,       # recycle connections after 5 mins
-    )
-
-    db.initialize(database)
-
-    with app.app_context():
-        try:
-            database.create_tables(ALL_MODELS, safe=True)
-            database.execute_sql(
-                "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
-            )
-            logger.info("Database initialized", extra={"component": "database"})
-        except Exception as e:
-            # If a 'duplicate key' error occurs, it means another clone already finished the setup
-            logger.warning(
-                "Database initialization skipped",
-                extra={"component": "database"},
-                exc_info=True,
-            )
-            print(f"Database already initialized by another instance, skipping: {e}")
-
-    register_db_hooks(app)
-=======
 import os
 import logging
 from urllib.parse import parse_qs, urlparse
@@ -104,7 +35,19 @@ def register_db_hooks(app):
 
 logger = logging.getLogger(__name__)
 
-_POOL = {"max_connections": 10, "stale_timeout": 300}
+
+def _primary_pool_kwargs() -> dict:
+    # Each gunicorn worker = separate process = separate pool. Cap per instance:
+    # workers × DATABASE_POOL_MAX ≤ ~18–20 when managed Postgres allows ~22 (leave room for admin).
+    mc = int(os.environ.get("DATABASE_POOL_MAX", "4"))
+    return {"max_connections": max(1, mc), "stale_timeout": 300}
+
+
+def _read_pool_kwargs() -> dict:
+    mc = os.environ.get("DATABASE_READ_POOL_MAX", "").strip()
+    if mc:
+        return {"max_connections": int(mc), "stale_timeout": 300}
+    return _primary_pool_kwargs()
 
 
 def _pg_connect_kwargs_from_query(query: str) -> dict:
@@ -134,7 +77,7 @@ def _primary_params_from_env() -> dict:
             "port": p.port or 5432,
             "user": p.username or "postgres",
             "password": p.password if p.password is not None else "",
-            **_POOL,
+            **_primary_pool_kwargs(),
             **_pg_connect_kwargs_from_query(p.query or ""),
         }
     return {
@@ -143,7 +86,7 @@ def _primary_params_from_env() -> dict:
         "port": int(os.environ.get("DATABASE_PORT", 5432)),
         "user": os.environ.get("DATABASE_USER", "postgres"),
         "password": os.environ.get("DATABASE_PASSWORD", "postgres"),
-        **_POOL,
+        **_primary_pool_kwargs(),
     }
 
 
@@ -166,7 +109,7 @@ def _make_read_replica(primary: PooledPostgresqlDatabase) -> PooledPostgresqlDat
             port=p.port or 5432,
             user=p.username or "postgres",
             password=p.password if p.password is not None else "",
-            **_POOL,
+            **_read_pool_kwargs(),
             **extras,
         )
         logger.info(
@@ -209,4 +152,3 @@ def init_db(app):
             print(f"Database already initialized by another instance, skipping: {e}")
 
     register_db_hooks(app)
->>>>>>> Stashed changes

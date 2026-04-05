@@ -161,6 +161,7 @@ def test_resolve_redirects(monkeypatch):
             return DummyUrlEntry("https://www.google.com", "my-google")
 
     monkeypatch.setattr(url_shortener, "Url", DummyUrl)
+    monkeypatch.setattr(url_shortener, "UrlRead", DummyUrl)
 
     response = client.get("/my-google")
 
