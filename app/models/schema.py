@@ -6,13 +6,15 @@ from peewee import (
     DatabaseProxy,
     DateTimeField,
     ForeignKeyField,
+    IntegerField,
     Model,
     TextField,
     IntegerField,
 )
 
 
-db = DatabaseProxy()
+db = DatabaseProxy()       # primary (writes)
+db_read = DatabaseProxy()  # read replica (cache-miss reads)
 
 class BaseModel(Model):
     class Meta:
@@ -33,7 +35,9 @@ class Event(BaseModel):
 
 class Url(BaseModel):
     original_url = CharField(max_length=2048)
+    title = CharField(max_length=255, null=True)
     short_code = CharField(max_length=50, unique=True)
+    clicks = IntegerField(default=0)
     revoked = BooleanField(default=False)
     event = ForeignKeyField(Event, backref='urls', null=True, on_delete='CASCADE')
     created_by = ForeignKeyField(User, backref='created_urls', null=True, on_delete='CASCADE')

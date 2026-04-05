@@ -293,13 +293,54 @@ docker compose up --build -d db app prometheus grafana
 
 Prometheus rule file: `monitoring/prometheus/alert-rules.yml`
 
-Current rule:
+Current rules:
 
 ```promql
+up{job="app"} == 0
 increase(app_errors_total[1m]) > 5
 ```
 
-This is evaluated every 10s. You can view alert state in Prometheus under Alerts.
+These are evaluated every 10s. You can view alert state in Prometheus under Alerts.
+
+### Alert delivery channel (Silver)
+
+This project includes Alertmanager and forwards alerts to a webhook channel (Discord/Slack webhook URL).
+
+1. Set your webhook URL in `.env` (this file is gitignored):
+
+```bash
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
+```
+
+2. Start monitoring stack:
+
+```bash
+docker compose up --build -d app prometheus alertmanager grafana
+```
+
+3. Open UIs:
+
+- Prometheus Alerts: `http://localhost:9090/alerts`
+- Alertmanager: `http://localhost:9093`
+
+### Fire drill (Silver demo in <5 minutes)
+
+Trigger `ServiceDown`:
+
+```bash
+docker compose stop app
+```
+
+Expected:
+
+- `ServiceDown` enters firing state after ~1 minute.
+- Notification arrives in your webhook channel.
+
+Restore service:
+
+```bash
+docker compose start app
+```
 
 ### Golden Signals dashboard
 

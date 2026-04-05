@@ -49,6 +49,7 @@ docker compose up --build -d
 
 echo "==> Waiting for load balancer http://127.0.0.1:8080/health (up to 120s)..."
 ok=false
+direct_app=false
 for i in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:8080/health" >/dev/null; then
     ok=true
@@ -59,10 +60,18 @@ for i in $(seq 1 60); do
 done
 
 if [ "$ok" != true ]; then
-  echo "Health check failed. Logs: docker compose logs --tail=80 app nginx"
-  exit 1
+  echo "Load balancer health check failed. Trying direct app health at http://127.0.0.1:5001/health ..."
+  if curl -sf "http://127.0.0.1:5001/health" >/dev/null; then
+    direct_app=true
+    echo "==> App is healthy on :5001; continuing with direct-app k6 mode."
+  else
+    echo "Health check failed. Logs: docker compose logs --tail=80 app nginx"
+    exit 1
+  fi
 fi
-echo "==> LB is up."
+if [ "$direct_app" = false ]; then
+  echo "==> LB is up."
+fi
 
 if [ "$STACK_ONLY" = true ]; then
   echo "Stack only (--stack-only). Run k6 when ready:"
@@ -72,8 +81,13 @@ fi
 
 if [ "$DOCKER_K6" = true ]; then
   echo "==> Running k6 in grafana/k6 (K6_IN_DOCKER=1)..."
+  K6_DIRECT_ENV=()
+  if [ "$direct_app" = true ]; then
+    K6_DIRECT_ENV=(-e K6_DIRECT_APP=1 -e BASE_URL=http://host.docker.internal:5001)
+  fi
   docker run --rm \
     -e K6_IN_DOCKER=1 \
+    "${K6_DIRECT_ENV[@]}" \
     -v "$ROOT:/work" \
     grafana/k6 run /work/k6/load.js
   exit 0
@@ -86,4 +100,8 @@ if ! command -v k6 >/dev/null 2>&1; then
 fi
 
 echo "==> Running k6 (default BASE_URL http://127.0.0.1:8080)..."
-k6 run k6/load.js
+if [ "$direct_app" = true ]; then
+  K6_DIRECT_APP=1 BASE_URL=http://127.0.0.1:5001 k6 run k6/load.js
+else
+  k6 run k6/load.js
+fi

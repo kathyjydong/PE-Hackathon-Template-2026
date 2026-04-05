@@ -3,9 +3,9 @@ import os
 import logging
 
 from flask import request
-from playhouse.pool import PooledPostgresqlDatabase
+from peewee import PostgresqlDatabase
 
-from app.models import ALL_MODELS, db
+from app.models import ALL_MODELS, db, db_read
 
 
 def register_db_hooks(app):
@@ -25,15 +25,19 @@ def register_db_hooks(app):
 
     @app.teardown_appcontext
     def _db_close(exc):
-        if not db.is_closed():
-            db.close()
+        for conn in (db, db_read):
+            try:
+                if not conn.is_closed():
+                    conn.close()
+            except Exception:
+                pass
 
 
 
 logger = logging.getLogger(__name__)
 
 def init_db(app):
-    database = PooledPostgresqlDatabase(
+    database = PostgresqlDatabase(
         os.environ.get("DATABASE_NAME", "hackathon_db"),
         host=os.environ.get("DATABASE_HOST", "localhost"),
         port=int(os.environ.get("DATABASE_PORT", 5432)),

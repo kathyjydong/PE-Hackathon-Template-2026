@@ -20,8 +20,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     restart: always
 
 # 2. The Clone Army (Your Flask App)
@@ -33,7 +31,10 @@ services:
       - sh
       - -c
       - |
+        rm -rf /tmp/prometheus
+        mkdir -p /tmp/prometheus
         exec uv run gunicorn -w "$${GUNICORN_WORKERS:-64}" \
+          --config gunicorn_conf.py \
           --bind unix:/tmp/app.sock \
           --bind 0.0.0.0:5000 \
           run:app
@@ -49,6 +50,7 @@ services:
       - DATABASE_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-64}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
       - BASE_URL=${BASE_URL}
       - REDIS_RESOLVE_DEBUG=${REDIS_RESOLVE_DEBUG:-}
 
@@ -95,6 +97,27 @@ services:
       - app
     restart: always
 
+  alertmanager:
+    image: prom/alertmanager:latest
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        if [ -z "$${DISCORD_WEBHOOK_URL:-}" ]; then
+          echo "DISCORD_WEBHOOK_URL is not set. Add it to .env before starting alertmanager." >&2
+          exit 1
+        fi
+        esc_url=$$(printf '%s' "$${DISCORD_WEBHOOK_URL}" | sed -e 's/[\\&]/\\\\&/g')
+        sed "s|__DISCORD_WEBHOOK_URL__|$${esc_url}|g" /etc/alertmanager/alertmanager.yml >/tmp/alertmanager.yml
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml
+    environment:
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    restart: always
+
   grafana:
     image: grafana/grafana:latest
     environment:
@@ -108,6 +131,7 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+      - alertmanager
     restart: always
 
 # This prevents your database from deleting all its data every time you restart
