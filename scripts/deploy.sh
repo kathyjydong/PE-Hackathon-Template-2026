@@ -4,7 +4,7 @@ set -e  # exit on error
 
 echo "🚀 Starting deployment..."
 
-cd ~/mlh-portfolio
+cd /home/deploy/apps/url-shortener
 
 echo "1. Pulling latest code..."
 git fetch origin main
