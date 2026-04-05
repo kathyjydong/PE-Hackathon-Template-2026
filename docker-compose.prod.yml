@@ -19,8 +19,8 @@ services:
       --error-logfile -
       run:app
       "
-    ports:
-      - "5001:5000"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - DATABASE_READ_URL=${DATABASE_READ_URL}
@@ -31,4 +31,22 @@ services:
       - GUNICORN_WORKERS=${GUNICORN_WORKERS}
     depends_on:
       - redis
+    volumes:
+      - socket_data:/tmp   # 🔥 CRITICAL (shared with nginx)
     restart: always
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - socket_data:/tmp   # 🔥 SAME VOLUME
+    depends_on:
+      - app
+    restart: always
+
+volumes:
+  socket_data:
