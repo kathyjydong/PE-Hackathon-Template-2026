@@ -48,14 +48,19 @@ def init_db(app):
             database.execute_sql(
                 "ALTER TABLE url ADD COLUMN IF NOT EXISTS revoked BOOLEAN NOT NULL DEFAULT FALSE;"
             )
+            database.execute_sql(
+                "ALTER TABLE url ADD COLUMN IF NOT EXISTS title VARCHAR(255);"
+            )
+            database.execute_sql(
+                "ALTER TABLE url ADD COLUMN IF NOT EXISTS clicks INTEGER NOT NULL DEFAULT 0;"
+            )
             logger.info("Database initialized", extra={"component": "database"})
-        except Exception as e:
+        except Exception:
             # If a 'duplicate key' error occurs, it means another clone already finished the setup
             logger.warning(
                 "Database initialization skipped",
                 extra={"component": "database"},
                 exc_info=True,
             )
-            print(f"Database already initialized by another instance, skipping: {e}")
 
     register_db_hooks(app)
