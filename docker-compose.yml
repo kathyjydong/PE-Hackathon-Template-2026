@@ -1,6 +1,7 @@
 services:
 # This is how we define the architecture of our system
-# 3 components:
+# 4 components: Database, App, Cache, Load Balancer
+
 # 1. The Database (Postgres)
   db:
     image: postgres:15-alpine
@@ -18,11 +19,12 @@ services:
       retries: 5
     restart: always
 
+# THE NEW SHIELD: Redis Cache
   redis:
     image: redis:7-alpine
+    restart: always
     ports:
       - "6379:6379"
-    restart: always
 
 # 2. The Clone Army (Your Flask App)
 # This is what gets scaled up and down based on traffic and where the actual app is
@@ -48,17 +50,24 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-64}
       - BASE_URL=${BASE_URL}
-      - REDIS_RESOLVE_DEBUG=${REDIS_RESOLVE_DEBUG:-}
+# Redis Connector
+      - REDIS_URL=redis://redis:6379/0  
 
     depends_on:
       db:
-        condition: service_healthy
+        condition: service_healthy # THE FIX: App waits for the DB Healthcheck to pass
       redis:
         condition: service_started
+        
+# limiter so that we dont kill the droplet by mistake
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+          
     volumes:
-      - socket_data:/tmp
-    ports:
-      - "${HOST_APP_PORT:-5001}:5000"
+      - socket_data:/tmp 
     restart: always
 
 # 3. The Traffic Cop (Nginx Load Balancer)
