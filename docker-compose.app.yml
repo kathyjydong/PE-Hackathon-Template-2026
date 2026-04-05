@@ -1,14 +1,15 @@
 services:
   app:
     build: .
-    # Using gevent for the Gold Tier performance requirement
     command: uv run gunicorn --worker-class gevent --workers 4 --bind 0.0.0.0:5000 run:app
-    
-    # THE FIX: This tells Docker to inject every variable from the .env file 
-    # directly into the container so Peewee can find the database credentials.
     env_file:
       - .env
-      
     ports:
       - "5000-5009:5000" 
+    networks:
+      - hackathon_network
     restart: always
+
+networks:
+  hackathon_network:
+    external: true

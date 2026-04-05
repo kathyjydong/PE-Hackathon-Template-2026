@@ -36,3 +36,7 @@ Thumbs.db
 judging/
 
 .pem
+
+# i dont need this to be pushed just for local dev
+nginx.local.conf
+.env

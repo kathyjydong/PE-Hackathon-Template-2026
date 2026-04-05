@@ -1,13 +1,16 @@
 services:
-  app:
-    build: .
-# command to run app with uv and gevent workers
-    command: uv run gunicorn --worker-class gevent --workers 4 --bind 0.0.0.0:5000 run:app
-# Opening the port up so Nginx on VPS 1 can reach the app hosted on VPS 2
-    ports:
-      - "5000-5009:5000" 
+  db:
+    image: postgres:alpine
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - BASE_URL=${BASE_URL}
+      - POSTGRES_DB=hackathon_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - hackathon_network
     restart: always
+
+networks:
+  hackathon_network:
+    external: true
