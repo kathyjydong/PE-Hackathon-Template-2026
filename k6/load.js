@@ -1,7 +1,6 @@
 import http from "k6/http";
 import { check, sleep } from "k6";
 import { Counter } from "k6/metrics";
-import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.2/index.js";
 
 /** Count X-Cache on successful redirects (verify Redis after warmup — expect mostly HIT for k6hot) */
 const resolveCacheHit = new Counter("resolve_x_cache_HIT");
@@ -25,6 +24,9 @@ const resolveCacheMiss = new Counter("resolve_x_cache_MISS");
  *
  * TARGET_VUS: default 500 (hackathon / tsunami). Override: TARGET_VUS=200 k6 run k6/load.js
  * K6_DIRECT_APP + run.py cannot sustain 500 VUs — use Docker + :8080 for full load, or TARGET_VUS=25.
+ *
+ * End-of-test report uses k6 native summary (summaryMode: full). Redis cache: see metrics
+ * resolve_x_cache_HIT and resolve_x_cache_MISS under TOTAL RESULTS.
  */
 function defaultBaseUrl() {
   if (__ENV.K6_IN_DOCKER === "1") {
@@ -106,6 +108,8 @@ function isRedirectStatus(code) {
 const RELAX_THRESHOLDS = DIRECT_APP && TARGET_VUS >= 100;
 
 export const options = {
+  /** Same layout as `k6 run --summary-mode full` (TOTAL RESULTS, HTTP block, p95, etc.). */
+  summaryMode: "full",
   discardResponseBodies: true,
   stages: [
     { duration: "15s", target: TARGET_VUS },
@@ -209,35 +213,6 @@ export function setup() {
   }
 
   return { alias: SEED_ALIAS };
-}
-
-export function handleSummary(data) {
-  // Defining handleSummary disables k6's default stdout summary; textSummary restores it (checks %, p95, etc.).
-  const standard = textSummary(data, { indent: " ", enableColors: true });
-
-  const h = data.metrics.resolve_x_cache_HIT?.values?.count ?? 0;
-  const m = data.metrics.resolve_x_cache_MISS?.values?.count ?? 0;
-  const n = h + m;
-  const pctHit = n > 0 ? ((100.0 * h) / n).toFixed(1) : "n/a";
-  const failRate = data.metrics.http_req_failed?.values?.rate;
-  const cacheNote =
-    n === 0
-      ? "  (no redirect samples — setup may have failed before any load; ignore this block)\n"
-      : "";
-
-  let tail =
-    `\n--- Redis / X-Cache on resolves (alias warmed in setup) ---\n` +
-    `  X-Cache HIT: ${h}   X-Cache MISS: ${m}   (${pctHit}% HIT of ${n} sampled redirects)\n` +
-    `  Expect mostly HIT for /${SEED_ALIAS} once Redis is hot.\n` +
-    cacheNote;
-
-  if (DIRECT_APP && failRate !== undefined && failRate > 0.05) {
-    tail +=
-      "\nIf you see many 'can't assign requested address' warnings: that is k6→127.0.0.1 client limits on macOS.\n" +
-      "Run the tsunami against nginx instead (no K6_DIRECT_APP):  k6 run k6/load.js\n";
-  }
-
-  return { stdout: standard + tail };
 }
 
 export default function (data) {
