@@ -45,11 +45,19 @@ def _is_valid_web_url(value):
 
 def _parse_json_body():
     if not request.is_json:
-        return None, (jsonify(error={"content_type": "Content-Type must be application/json"}), 415)
+        return None, (
+            jsonify(error={"content_type": "Content-Type must be application/json"}),
+            415,
+        )
     try:
-        return request.get_json(silent=False), None
+        payload = request.get_json(silent=False)
     except BadRequest:
         return None, (jsonify(error={"body": "Malformed JSON body"}), 400)
+
+    if not isinstance(payload, dict):
+        return None, (jsonify(error={"body": "Request body must be a JSON object"}), 400)
+
+    return payload, None
 
 
 def _generate_unique_short_code():
@@ -60,20 +68,58 @@ def _generate_unique_short_code():
     raise RuntimeError("Failed to generate a unique short code")
 
 
+def _parse_query_int(name):
+    raw = request.args.get(name)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be an integer")
+
+
 def _extract_url_value(payload):
     if "original_url" in payload:
-        return payload.get("original_url"), "original_url"
+        return payload.get("original_url"), "original_url", True
     if "url" in payload:
-        return payload.get("url"), "url"
-    return None, "original_url"
+        return payload.get("url"), "url", True
+    return None, "original_url", False
+
+
+def _validate_url_field(value, field_name, required=False):
+    if value is None:
+        if required:
+            raise ValueError(f"{field_name} is required")
+        return None
+
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a valid http/https URL")
+
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a valid http/https URL")
+
+    cleaned = value.strip()
+    if not cleaned:
+        if required:
+            raise ValueError(f"{field_name} is required")
+        raise ValueError(f"{field_name} must be a valid http/https URL")
+
+    if not _is_valid_web_url(cleaned):
+        raise ValueError(f"{field_name} must be a valid http/https URL")
+
+    return cleaned
 
 
 @urls_bp.route("", methods=["GET"])
 @urls_bp.route("/", methods=["GET"])
 def list_urls():
+    try:
+        user_id = _parse_query_int("user_id")
+    except ValueError as exc:
+        return jsonify(error={"user_id": str(exc)}), 400
+
     query = Url.select().order_by(Url.id)
 
-    user_id = request.args.get("user_id", type=int)
     if user_id is not None:
         query = query.where(Url.created_by_id == user_id)
 
@@ -102,25 +148,24 @@ def create_url():
     if error_response:
         return error_response
 
-    if not isinstance(payload, dict):
-        return jsonify(error={"body": "Request body must be a JSON object"}), 400
-
-    original_url, url_field = _extract_url_value(payload)
+    original_url_raw, url_field, url_present = _extract_url_value(payload)
     title = payload.get("title")
     user_id = payload.get("user_id")
 
-    if not isinstance(original_url, str) or not original_url.strip():
+    if not url_present:
         return jsonify(error={url_field: f"{url_field} is required"}), 400
 
-    if not _is_valid_web_url(original_url):
-        return jsonify(error={url_field: f"{url_field} must be a valid http/https URL"}), 400
+    try:
+        original_url = _validate_url_field(original_url_raw, url_field, required=True)
+    except ValueError as exc:
+        return jsonify(error={url_field: str(exc)}), 400
 
     if title is not None and not isinstance(title, str):
         return jsonify(error={"title": "title must be a string"}), 400
 
     created_by = None
     if user_id is not None:
-        if not isinstance(user_id, int):
+        if isinstance(user_id, bool) or not isinstance(user_id, int):
             return jsonify(error={"user_id": "user_id must be an integer"}), 400
         created_by = User.get_or_none(User.id == user_id)
         if created_by is None:
@@ -128,7 +173,7 @@ def create_url():
 
     try:
         item = Url.create(
-            original_url=original_url.strip(),
+            original_url=original_url,
             title=title,
             short_code=_generate_unique_short_code(),
             created_by=created_by,
@@ -137,6 +182,8 @@ def create_url():
         )
     except IntegrityError:
         return jsonify(error={"url": "Failed to create URL"}), 409
+    except RuntimeError:
+        return jsonify(error={"short_code": "Failed to generate a unique short code"}), 500
 
     return jsonify(_serialize_url(item)), 201
 
@@ -150,9 +197,6 @@ def update_url(url_id):
     payload, error_response = _parse_json_body()
     if error_response:
         return error_response
-
-    if not isinstance(payload, dict):
-        return jsonify(error={"body": "Request body must be a JSON object"}), 400
 
     updates = {}
 
@@ -168,13 +212,12 @@ def update_url(url_id):
             return jsonify(error={"is_active": "is_active must be a boolean"}), 400
         updates["revoked"] = not is_active
 
-    original_url, url_field = _extract_url_value(payload)
-    if original_url is not None:
-        if not isinstance(original_url, str) or not original_url.strip():
-            return jsonify(error={url_field: f"{url_field} must be a non-empty string"}), 400
-        if not _is_valid_web_url(original_url):
-            return jsonify(error={url_field: f"{url_field} must be a valid http/https URL"}), 400
-        updates["original_url"] = original_url.strip()
+    original_url_raw, url_field, url_present = _extract_url_value(payload)
+    if url_present:
+        try:
+            updates["original_url"] = _validate_url_field(original_url_raw, url_field, required=True)
+        except ValueError as exc:
+            return jsonify(error={url_field: str(exc)}), 400
 
     if not updates:
         return jsonify(error={"body": "No valid fields provided"}), 400
