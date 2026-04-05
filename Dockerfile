@@ -20,7 +20,10 @@ RUN uv sync
 # This line copies the rest of the code into container
 COPY . .
 
-# This is what actually runs the code within the contianer when it wakes up. 
-# It uses uv and gunicorn so instead of waiting in a line to run the code, 
-# it can run multiple instances of the code at the same time and handle multiple requests at the same time. 
-CMD ["uv", "run", "gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "run:app"]
+# Gunicorn: sync workers; each worker handles one request at a time. Under k6 (500+ VUs), -w 4
+# causes massive queueing and ~50%+ failures — scale workers (and backlog) with GUNICORN_WORKERS.
+ENV GUNICORN_WORKERS=64
+ENV GUNICORN_BACKLOG=2048
+ENV GUNICORN_TIMEOUT=120
+# shell form so env vars expand
+CMD sh -c 'exec uv run gunicorn -w "${GUNICORN_WORKERS}" --backlog "${GUNICORN_BACKLOG}" --timeout "${GUNICORN_TIMEOUT}" -b 0.0.0.0:5000 run:app'
