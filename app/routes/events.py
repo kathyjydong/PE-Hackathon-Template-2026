@@ -2,11 +2,21 @@ import json
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
+from werkzeug.exceptions import BadRequest
 
 from app.models import Event, Url, User
 
 
 events_bp = Blueprint("events", __name__)
+
+
+def _parse_json_body():
+    if not request.is_json:
+        return None, (jsonify(error={"content_type": "Content-Type must be application/json"}), 415)
+    try:
+        return request.get_json(silent=False), None
+    except BadRequest:
+        return None, (jsonify(error={"body": "Malformed JSON body"}), 400)
 
 
 def _parse_datetime(value):
@@ -79,7 +89,9 @@ def list_events():
 
 @events_bp.route("/events", methods=["POST"])
 def create_event():
-    payload = request.get_json(silent=True)
+    payload, error_response = _parse_json_body()
+    if error_response:
+        return error_response
     if not isinstance(payload, dict):
         return jsonify(error={"body": "Request body must be a JSON object"}), 400
 

@@ -3,11 +3,21 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 from peewee import IntegrityError, chunked
+from werkzeug.exceptions import BadRequest
 
 from app.models import User
 
 
 users_bp = Blueprint("users", __name__)
+
+
+def _parse_json_body():
+    if not request.is_json:
+        return None, (jsonify(error={"content_type": "Content-Type must be application/json"}), 415)
+    try:
+        return request.get_json(silent=False), None
+    except BadRequest:
+        return None, (jsonify(error={"body": "Malformed JSON body"}), 400)
 
 
 def _serialize_user(user):
@@ -143,7 +153,9 @@ def get_user(user_id):
 
 @users_bp.route("/users", methods=["POST"])
 def create_user():
-    payload = request.get_json(silent=True)
+    payload, error_response = _parse_json_body()
+    if error_response:
+        return error_response
     try:
         username, email = _parse_user_payload(payload)
     except ValueError as exc:
@@ -175,7 +187,9 @@ def update_user(user_id):
     if user is None:
         return jsonify(error="Not found"), 404
 
-    payload = request.get_json(silent=True)
+    payload, error_response = _parse_json_body()
+    if error_response:
+        return error_response
     if not isinstance(payload, dict):
         return jsonify(error={"body": "Request body must be a JSON object"}), 400
 
