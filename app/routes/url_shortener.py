@@ -108,6 +108,8 @@ def shorten():
 
     data = data or {}
     long_url = data.get("url")
+    if long_url is None:
+        long_url = data.get("original_url")
     custom_alias = (data.get("custom_alias") or "").strip()
     user_id = data.get("user_id")
 
