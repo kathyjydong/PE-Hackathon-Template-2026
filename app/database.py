@@ -17,10 +17,10 @@ def register_db_hooks(app):
     @app.before_request
     def _db_connect():
         ep = request.endpoint
-        if ep in ("health", "home"):
+        if ep == "static" or request.path.startswith('/static'):
             return
-        if ep == "url.resolve":
-            return
+        if ep in ("health", "home", "url.resolve"):
+            return    
         db.connect(reuse_if_open=True)
 
     @app.teardown_appcontext
