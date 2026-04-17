@@ -18,12 +18,9 @@ bind = [
 backlog = int(os.environ.get("GUNICORN_BACKLOG", "2048"))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", "120"))
 
-# Switch the default fallback to gevent
-worker_class = os.environ.get("GUNICORN_WORKER_CLASS", "gevent").strip().lower()
+# Reverted back to the stable gthread fallback
+worker_class = os.environ.get("GUNICORN_WORKER_CLASS", "gthread").strip().lower()
 workers = int(os.environ.get("GUNICORN_WORKERS", "4"))
-
-# Add this line to tell gevent it can juggle 1,000 connections per worker!
-worker_connections = int(os.environ.get("GUNICORN_WORKER_CONNECTIONS", "1000"))
 
 if worker_class == "gthread":
     # Extra threads compensate for fewer workers (keeps Redis resolve concurrency up).
