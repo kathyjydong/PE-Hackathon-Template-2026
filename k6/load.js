@@ -13,23 +13,21 @@ const resolveCacheMiss = new Counter("resolve_x_cache_MISS");
  * Do NOT set BASE_URL to :5000/:5001 unless K6_DIRECT_APP=1 — that bypasses nginx.
  *
  * Host k6 (same machine as Docker Desktop):
- *   k6 run k6/load.js
+ * k6 run k6/load.js
  *
  * Mixed workload (health + shorten + resolve) for other experiments:
- *   K6_MIXED_WORKLOAD=1 k6 run k6/load.js
+ * K6_MIXED_WORKLOAD=1 k6 run k6/load.js
  *
  * k6 inside Docker (grafana/k6):
- *   docker run --rm -e K6_IN_DOCKER=1 -v "$PWD:/work" grafana/k6 run /work/k6/load.js
+ * docker run --rm -e K6_IN_DOCKER=1 -v "$PWD:/work" grafana/k6 run /work/k6/load.js
  *
  * TARGET_VUS: default 500. K6_DIRECT_APP + run.py cannot sustain 500 VUs — use Docker + :8080.
  *
  * End-of-test: summaryMode full. Redis: resolve_x_cache_HIT / resolve_x_cache_MISS in TOTAL RESULTS.
  */
 function defaultBaseUrl() {
-  if (__ENV.K6_IN_DOCKER === "1") {
-    return "http://host.docker.internal:8080";
-  }
-  return "http://127.0.0.1:8080";
+  // Point directly to production
+  return "https://short.urlshortener-mlh.xyz";
 }
 
 const BASE_URL = (__ENV.BASE_URL || defaultBaseUrl()).replace(/\/$/, "");
@@ -136,9 +134,11 @@ export function setup() {
         "(ephemeral ports). For strict thresholds + 500 VUs use: docker compose up --build && k6 run k6/load.js"
     );
   }
-  if (!DIRECT_APP && !BASE_URL.includes(":8080")) {
+  
+  // Updated check to allow standard https production URLs
+  if (!DIRECT_APP && !BASE_URL.includes(":8080") && !BASE_URL.startsWith("https")) {
     throw new Error(
-      "k6: BASE_URL must hit nginx on port :8080 (not :5000/:5001).\n" +
+      "k6: BASE_URL must hit nginx on port :8080 (not :5000/:5001) or be a valid https URL.\n" +
         "  On host:  k6 run k6/load.js  or  BASE_URL=http://127.0.0.1:8080 k6 run k6/load.js\n" +
         "  In grafana/k6 container:  -e K6_IN_DOCKER=1  or  -e BASE_URL=http://host.docker.internal:8080\n" +
         "  Linux Docker: add  --add-host=host.docker.internal:host-gateway\n" +
@@ -177,7 +177,9 @@ export function setup() {
     custom_alias: SEED_ALIAS,
   });
   const seed = postJson(`${BASE_URL}/shorten`, seedPayload);
-  if (seed.status !== 201 && seed.status !== 200) {
+  
+  // === THIS IS THE FIX: Allow 409 Conflict if the link already exists ===
+  if (seed.status !== 201 && seed.status !== 200 && seed.status !== 409) {
     throw new Error(
       `k6 setup: seed shorten → ${seed.status} body=${String(seed.body).slice(0, 200)}`
     );
@@ -255,7 +257,8 @@ function runMixedWorkload(data) {
 export default function (data) {
   if (MIXED_WORKLOAD) {
     runMixedWorkload(data);
-  } else {
+  } 
+  else {
     runResolveOnly(data);
   }
 }
